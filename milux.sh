@@ -1,5 +1,5 @@
 #!/data/data/com.termux/files/usr/bin/bash 
-version=v3.0
+version=v4.0
 
 #variables
 sql=https://github.com/sqlmapproject/sqlmap
