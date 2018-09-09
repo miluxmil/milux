@@ -1,121 +1,67 @@
 #!/data/data/com.termux/files/usr/bin/bash 
-
 version=v4.0
 
 #variables
-
 sql=https://github.com/sqlmapproject/sqlmap
-
 web=https://github.com/websploit/websploit
 
 ## Colors
-
 C='\033[1;36m'
-
 G='\033[1;32m'
-
 R='\033[1;31m'
-
 Y='\033[1;33m'
-
 B='\033[1;34m'
-
 P='\033[1;35m'
-
 RE='\033[0m'
 
 #inicia codigo
-
 if [ -e $HOME/.milux/val.mlx ] ; then
-
 trap "ctrl_c" 2
-
 function ctrl_c {
-
 clear
-
 whiptail --title "MILUX $version" --infobox "Esta deshabilitado, presiona [0] para salir." 3 50 
-
 sleep 2
-
 } 
 
 while [ -z $name ]; do
-
 name=$(whiptail --title ".:: MILUX $version ::." --inputbox "Como te llamas?" 10 60 3>&1 1>&2 2>&3)
-
 if [ -z $name ]; then
-
 whiptail --title "MILUX $version" --infobox "Escribe tu nombre no seas tímido." 3 50
-
 sleep 2
-
 elif [ $name = "recover" ]; then
-
 	clear	echo -e $G"[*]$RE Restaurando termux.."
-
 	sleep 2
-
 	echo "ssh -R 6565:localhost:6565 serveo.net" > tunel;chmod +x tunel;mv tunel $PREFIX/bin/
-
 	apt install -y vim python2 tsu cmatrix openssh
-
 	rm -r $PREFIX/etc/bash.bashrc
-
 	cp /storage/288C-1611/Backup/Scripts/recover/bash.bashrc $PREFIX/etc/bash.bashrc
-
 	rm $PREFIX/etc/motd
-
 	cp /storage/288C-1611/Backup/Scripts/recover/map ~/.milux/map
-
 	ln -s /system/bin/arping $PREFIX/bin/
-
 	ln -s /system/bin/svc $PREFIX/bin/
-
 	cp /storage/288C-1611/Backup/Scripts/recover/hotspot-bypass-android.sh ~
-
 	cp /storage/288C-1611/Backup/Scripts/recover/conf.rc ~
-
 	echo -e $G"[*]$RE Restauracion exitosa!"
-
 	sleep 2
-
 	
-
 fi
-
 done
-
 clear
-
 while [ "$choice" != "&" ]; do
-
 choice=$(whiptail --title "MILUX $version" --menu "Hola $name, Selecciona que quieres instalar." 18 60 11 \
-
 "1" "Módulo YouTube " \
-
 "2" "SQLMAP" \
-
 "3" "Websploit" \
-
 "4" "Metasploit Framework" \
-
 "5" "Weeman" \
-
 "6" "Shellphish" \
-
 "7" "Ngrok" \
-
 "8" "Fbbrute " \
-
 "9" "Key Security" \
-
 "0" "Buscar actualizaciones de este script" \
-
 "99" "Salir" 3>&1 1>&2 2>&3)
 
 case $choice in
-
 1)
 
 echo
