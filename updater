@@ -1,4 +1,5 @@
-#!/bin/bash                                                                                                                 wget https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener -O ~/bin/termux-url-opener                                                                                 wget https://raw.githubusercontent.com/miluxmil/milux/master/update -O ~/bin/update
+#!/bin/bash
+
 wget https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener -O ~/bin/termux-url-opener
 
 wget https://raw.githubusercontent.com/miluxmil/milux/master/update -O ~/bin/update
