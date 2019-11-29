@@ -13,7 +13,7 @@ logo
 echo -e "$G Buscando la version mas nueva.."
 sleep 2
 echo -e "Espera por favor"
-curl https://pastebin.com/raw/2r8bPRHv > /dev/null 2>&1 > tmpv
+curl https://raw.githubusercontent.com/miluxmil/milux/master/updater > /dev/null 2>&1 > tmpv
 mv tmpv  ~/.milux/
 CV=$(cat ~/.milux/vcv)
 NV=$(cat ~/.milux/tmpv)
