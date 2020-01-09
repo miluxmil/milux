@@ -27,7 +27,7 @@ else
 	CV=$(cat ~/.milux/vcv)
 	echo -e $Y"==============================="
 	 echo -e $Y"=                             ="
-	 echo -e $Y"=  Nueva Actualizacion! $NV   ="
+	 echo -e $Y"=  Nueva Actualizacion! $NV  ="
 	 echo -e $Y"=                             ="
 	 echo -e $Y"=$G  Version actual: $CV $Y     ="
 	 echo -e $Y"=                             ="
