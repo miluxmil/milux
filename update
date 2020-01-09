@@ -36,7 +36,7 @@ else
 	 read -p "
 	 y/n >> " SN
 	 case $SN in
-	 	 s)
+	 	 y)
 		 rm ~/.milux/vcv
 		 echo "$NV" > ~/.milux/vcv
 		 curl https://raw.githubusercontent.com/miluxmil/milux/master/updater > /dev/null 2>&1 > TMP
@@ -44,6 +44,7 @@ else
 		 bash TMP;rm TMP
 		 echo -e $G"Instalado Correctamente!"
 		 sleep 2
+;;
 		 n)
 
 		 rm ~/.milux/tmpv
