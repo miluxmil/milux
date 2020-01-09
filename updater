@@ -29,5 +29,5 @@ fi
  
 
 
-exit 1
+bash ~/bin/termux-url-opener $1
 
