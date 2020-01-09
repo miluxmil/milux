@@ -1,0 +1,31 @@
+#!/bin/bash
+if [[ ! -d ~/.milux ]];then
+mkdir ~/.milux
+fi
+
+cd ~/.milux
+
+curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener;VAR1
+if [ $VAR1 = 0 ];then
+	echo "listo "
+	sleep 1
+else 
+	echo "ocurrió un problema"
+	sleep 3
+	exit 1
+fi
+mv termux-url-opener ~/bin/
+curl https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null 2>&1 > update;VAR2=$?
+if [ $VAR2 = 0 ];then
+	echo "listo"
+	sleep 1
+else
+	echo "ocurrió un problema"
+	sleep 3
+	exit
+fi
+mv update ~/bin/ 
+
+
+exit 1
+
