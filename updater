@@ -3,7 +3,7 @@ if [[ ! -d ~/.milux ]];then
 mkdir ~/.milux
 fi
 
-cd ~./milux
+cd ~/.milux
 curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener
 mv termux-url-opener ~/bin/
 curl https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null 2>&1 > update
