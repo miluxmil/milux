@@ -1,0 +1,50 @@
+#!/bin/bash
+if [[ ! -d ~/.milux ]];then
+mkdir ~/.milux
+fi
+
+cd ~/.milux
+
+curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener;VAR1
+if [ $VAR1 = 0 ];then
+	echo "Downloader..  OK "
+	sleep 1
+	chmod 777 termux-url-opener
+	mv termux-url-opener ~/bin/
+else 
+	echo "ocurrió un problema"
+	sleep 3
+	exit 1
+fi
+
+curl https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null 2>&1 > update;VAR2=$?
+if [ $VAR2 = 0 ];then
+	echo "Update... OK"
+	sleep 1
+	mv update ~/bin/
+else
+	echo "ocurrió un problema"
+	sleep 3
+	exit
+fi 
+curl https://raw.githubusercontent.com/miluxmil/milux/master/logo > /dev/null 2>&1 > logo;VAR3=$?
+if [ $VAR3 = 0 ];then
+	echo "Logo... OK"
+	sleep 1
+	mv logo ~/bin
+else
+	echo "Ocurrio un problema"
+	sleep 3
+	exit
+fi
+echo -e $G"
+Lista de cambios$RE
+
+1.-$G Cambio de logo$RE
+2.-$G Optimizacion$RE
+3.-$G Se agrego el comando: update$RE"
+read -n 1 -p "
+ENTER para salir"
+
+
+
