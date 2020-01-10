@@ -5,7 +5,7 @@ fi
 
 cd ~/.milux
 
-curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener;VAR1
+curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener;VAR1=$? 
 if [ $VAR1 = 0 ];then
 	echo "Downloader..  OK "
 	sleep 1
