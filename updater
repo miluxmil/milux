@@ -27,22 +27,14 @@ else
 	sleep 3
 	exit
 fi 
-curl https://raw.githubusercontent.com/miluxmil/milux/master/logo > /dev/null 2>&1 > logo;VAR3=$?
-if [ $VAR3 = 0 ];then
-	echo "Logo... OK"
-	sleep 1
-	mv logo ~/bin
-else
-	echo "Ocurrio un problema"
-	sleep 3
-	exit
-fi
+
 echo -e $G"
 Lista de cambios$RE
 
 1.-$G Cambio de logo$RE
 2.-$G Optimizacion$RE
-3.-$G Se agrego el comando: update$RE"
+3.-$G Se agrego el comando: update$RE
+4.-$G Se reparo problema de solo video"
 read -n 1 -p "
 ENTER para salir"
 
