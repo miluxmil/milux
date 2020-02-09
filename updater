@@ -32,10 +32,12 @@ fi
 echo -e $G"
 Lista de cambios$RE
 
-1.-$G Optimizacion$RE
-2.-$G Se reparo problema de solo video
-3.-$G Se resolvieron algunos errores al detectar formatos
-"
+*$G Optimizacion
+* Se reparo problema de solo video
+* Se resolvieron algunos errores al detectar formatos
+* Cambio de cursor
+* Mejoras
+* Optimizaciones"
 read -n 1 -p "
 ENTER para salir"
 
