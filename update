@@ -97,6 +97,7 @@ function _DATE (){
 if [ "$DATE" = "$TDATE" ];then
 	echo
 else
+        echo "$TDATE" > ~/.milux/date
 	_CHECK
 fi
 }
