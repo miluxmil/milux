@@ -12,7 +12,7 @@ VA=$(cat ~/.milux/vcv)
 URL=$1
 RUTA=/sdcard/youtube/
 source ~/bin/update
-source ~/ydl/update
+
 echo "$1" > url
 TRACK=$(cat url |grep track);TRAK=$?
 YTRACK=$(cat url |grep playlist);YTRAK=$?
