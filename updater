@@ -37,7 +37,9 @@ Lista de cambios$RE
 * Se resolvieron algunos errores al detectar formatos
 * Cambio de cursor
 * Mejoras
-* Optimizaciones"
+* Optimizaciones
+* Se reparo descargas Spotify
+* Optimizacion"
 read -n 1 -p "
 ENTER para salir"
 
