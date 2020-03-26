@@ -39,7 +39,9 @@ Lista de cambios$RE
 * Mejoras
 * Optimizaciones
 * Se reparo descargas Spotify
-* Optimizacion"
+* Optimizacion
+* Se agregó opción salir
+* chequeo en todos los modos"
 read -n 1 -p "
 ENTER para salir"
 
