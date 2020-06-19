@@ -43,7 +43,10 @@ Lista de cambios$RE
 * Se agregó opción salir
 * chequeo en todos los modos
 * Modo de espera cambiado
-* Algunas mejoras"
+* Algunas mejoras
+19/jun/20
+* Mejoras esteticas
+* Errores menores"
 read -n 1 -p "
 ENTER para salir"
 
