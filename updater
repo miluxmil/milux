@@ -46,6 +46,9 @@ Lista de cambios$RE
 * Algunas mejoras
 19/jun/20
 * Mejoras esteticas
+* Errores menores
+26/jun/2020
+* Comprobación más completa
 * Errores menores"
 read -n 1 -p "
 ENTER para salir"
