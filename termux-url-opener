@@ -1,0 +1,295 @@
+#!/data/data/com.termux/files/usr/bin/bash
+# Copyright 2018 ::milux::
+
+C='\033[1;36m'
+G='\033[1;32m'
+R='\033[1;31m'
+Y='\033[1;33m'
+B='\033[1;34m'
+P='\033[1;35m'
+RE='\033[0m'
+VA=$(cat ~/.milux/vcv)
+URL=$1
+RUTA=/sdcard/youtube/
+source ~/bin/update
+echo "$1" > url
+TRACK=$(cat url |grep track);TRAK=$?
+rm url
+#_DATE
+
+
+###################  FUNCTIONS #####################
+function logo {
+	clear
+	echo -e $G "
+##############################################
+##                                          ##
+##$RE      Y D L  -  D O W N L O A D E R$G       ##
+##$R                            by -Milux-$G    ##
+##                                          ##
+##$RE   Youtube   -  Spotify   -   Dalymotion$G  ##
+##############################################
+                       $RE       Version:$B $VA $G
+//////////////////////////////////////////////"
+echo -e "$RE"
+}
+
+function EXIT {
+	logo
+rm ~/.milux/formats.mlx
+echo -e $G"Se ha descargado con Exito!$RE"
+}
+
+function FORMATS {
+
+	echo -e $G"[$RE 1$G ]$Y Descargar en MP3$RE"
+
+
+F240=$(cat ~/.milux/formats.mlx |grep "133" |awk '{print $1}' | grep 133)
+if [ "$F240" = "133" ];then
+	echo -e $G"[$RE 2$G ]$Y Descargar en 426x240 - 240p$RE"
+else
+	echo -e $G"[$RE X$G ]$R 240p No Disponible$RE"
+fi
+
+F360=$(cat ~/.milux/formats.mlx |grep "134" |awk '{print $1}' | grep 134)
+if [ "$F360" = "134" ];then
+	echo -e $G"[$RE 3$G ]$Y Descargar en 640x360 - 360p$RE"
+else
+	echo -e $G"[$RE X$G ]$R 360p No Disponible$RE"
+fi
+
+F480=$(cat ~/.milux/formats.mlx |grep "135" |awk '{print $1}' | grep 135)
+if [ "$F480" = "135" ];then
+	echo -e $G"[$RE 4$G ]$Y Descargar en 854x480 - 480p$RE"
+else
+	echo -e $G"[$RE X$G ]$R 480p No Disponible$RE"
+fi
+
+F720=$(cat ~/.milux/formats.mlx |grep "136" |awk '{print $1}' | grep 136)
+if [ "$F720" = "136" ];then
+	echo -e $G"[$RE 5$G ]$Y Descargar en 1280x720 - 720p$RE"
+else
+	echo -e $G"[$RE X$G ]$R 720p No Disponible$RE"
+fi
+
+F1080=$(cat ~/.milux/formats.mlx |grep "137" |awk '{print $1}' |grep 137)
+if [ "$F1080" = "137" ];then
+	echo -e $G"[$RE 6$G ]$Y Descargar en 1920x1080 - 1080p$RE"
+else
+	echo -e $G"[$RE X$G ]$R 1080p No Disponible$RE"
+fi
+
+F1440=$(cat ~/.milux/formats.mlx |grep "271" |awk '{print $1}' |grep 271)
+if [ "$F1440" = "271" ];then
+	echo -e $G"[$RE 7$G ]$Y Descargar en 2560x1440 - 1440p$RE"
+else
+	echo -e $G"[$RE X$G ]$R 1440p No Disponible$RE"
+fi
+
+F4K=$(cat ~/.milux/formats.mlx |grep "313" |awk '{print $1}' |grep 313)
+if [ "$F4K" = "313" ];then
+	echo -e $G"[$RE 8$G ]$Y Descargar en 3840x2160 - 4K$RE"
+else
+	echo -e $G"[$RE X$G ]$R 4K No Disponible$RE"
+fi
+echo -e $G"[$RE U$G ]$Y Buscar la ultima version$RE"
+echo -e $G"[$RE F$G ]$Y Repar script$RE"
+echo -e $G"[$RE X$G ]$Y Salir $RE"
+}
+
+
+
+################ END FUNCTIONS ######################
+
+############## SPOTIFY #######################
+
+if [[ $URL == *"open.spotify.com"* ]]; then
+
+if [ $TRAK = 0 ];then
+        _S="-s"
+        DC="Descargando Cancion"
+else
+        _S="--playlist"
+        DC="Descargando Playlist"
+fi
+
+    SONG_DIR="/sdcard/youtube/spotify"
+    logo
+    echo -e $G "Spotify$RE"
+    echo -e $G "$DC $RE"
+
+    if [[ ! -d $SONG_DIR ]]; then
+        mkdir $SONG_DIR
+    fi
+    
+ if [ $_S = "-s" ];then
+
+	spotdl $_S $URL -f $SONG_DIR 
+else
+	spotdl $_S $URL  -f $SONG_DIR
+
+    fi
+
+    _OK
+
+################## YOUTUBE ###################
+
+elif [[ $URL == *"youtu.be"* ]]; then
+logo
+youtube-dl -F $1 > /dev/null 2>&1 > ~/.milux/formats.mlx  & spin
+FORMATS
+echo -e $G"
+[$Y !$G ]$RE SI TODAS LAS OPCIONES ES: [ NO DISPONIBLE ] REINTENTA"
+command='--no-warnings -no-mtime -o /data/data/com.termux/files/home/storage/shared/Youtube/%(title)s.%(ext)s -f'
+
+read -p "-Milux- >> " option
+if [ $option = "U" ] || [ $option = "u" ];then
+	UPDATE
+	bash $0 $1
+fi
+
+if [ $option = "X" ] || [ $option = "x" ];then
+    exit
+fi
+
+echo
+echo -e $G"Descargando..$RE"
+if [ "$option" -eq "1" ];then
+	_MP3
+
+    if [ "$M" = "0" ];then
+	_OK
+    else
+	_ERROR
+    fi
+
+elif [ "$option" -eq "2" ];then
+	echo "$command 133+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" -eq "3" ];then
+	echo "$command 134+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" -eq "4" ];then
+	echo "$command 135+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" -eq "5" ];then
+	echo "$command 136+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" -eq "6" ];then
+	echo "$command 137+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" -eq "7" ];then
+	echo "$command 271+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" -eq "8" ];then
+	echo "$command 313+140" > ~/.config/youtube-dl/config
+	youtube-dl $URL;M=$?
+	if [ "$M" = "0" ];then
+		_OK
+	else
+		_ERROR
+	fi
+
+elif [ "$option" = "F" ] || [ "$option" = "f" ];then
+	_FIX
+	bash $0 $1
+
+fi
+
+################### END YOUTUBE ###################
+
+
+elif [[ $URL == *"dailymotion.com"* ]]; then
+
+	logo
+	echo -e $G"dailymotion - espera.. Obteniendo formatos$RE
+	"
+	youtube-dl -F $URL  > dtmp
+
+CHD=$(cat dtmp |grep -e http-1080 -e hls-1080-0 -e hls-1080-1 |awk '{print $1}' |sed '1d')
+CHD1=$(cat dtmp |grep -e http-720 -e hls-720-0 -e hls-720-1 |awk '{print $1}')
+cat dtmp |grep -e http-1080 -e hls-720-0 -e hls-720-1 > /dev/null 2>&1; D1080=$?
+cat dtmp |grep -e http-720 -e hls-720-0 -e hls-720-1 > /dev/null 2>&1; D720=$?
+cat dtmp |grep -e http-480 -e hls-480-0 -e hls-480-1 > /dev/null 2>&1; D480=$?
+cat dtmp |grep -e http-380 -e hls-380-0 -e hls-380-1 > /dev/null 2>&1; D380=$?
+cat dtmp |grep -e http-240 -e hls-240-0 -e hls-240-1 > /dev/null 2>&1; D240=$?
+
+rm -rf dtmp
+if [ $D1080 = 0 ];then
+ echo -e $G"[$RE 1$G ]$Y Video calidad 1080p"
+fi
+if [ $D720 = 0 ];then
+echo -e $G"[$RE 2$G ]$Y Video calidad 720p"
+fi
+if [ $D480 = 0 ];then
+echo -e $G"[$RE 3$G ]$Y Video calidad 480p"
+fi
+if [ $D380 = 0 ];then
+echo -e $G"[$RE 4$G ]$Y Video calidad 380p"
+fi
+if [ $D240 = 0 ];then
+echo -e $G"[$RE 5$G ]$Y Video calidad 240p$G"
+fi
+read -p "
+Selecciona una opcion >> " DOPT
+if [ $DOPT = 1 ];then
+	youtube-dl -f $CHD $URL
+	echo -e $G"Listo!  "
+	sleep 2
+	read enter
+elif [ $DOPT = 2 ];then
+	youtube-dl -f $CHD1 $URL
+	echo -e $G"Listo!  "
+	sleep 2
+elif [ $DOPT = 3 ];then
+	youtube-dl -f http-480 $URL
+	echo -e $G"Listo!  "
+	sleep 2
+elif [ $DOPT = 4 ];then
+	youtube-dl -f http-380 $URL
+	echo -e $G"Listo!  "
+	sleep 2
+elif [ $DOPT = 5 ];then
+	youtube-dl -f http-240 $URL
+	echo -e $G"Listo!  "
+	sleep 2
+fi
+fi
+
