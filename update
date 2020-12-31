@@ -1,0 +1,255 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+function UPDATE {
+if [[ ! -d ~/.milux ]];then
+	mkdir ~/.milux
+fi
+if [[ ! -f ~/.milux/vcv ]];then
+	echo "v-2.0" > ~/.milux/vcv
+fi
+
+echo -e "$G"
+logo
+echo -e "$G Buscando la version mas nueva.."
+sleep 2
+echo -e "Espera por favor"
+curl https://raw.githubusercontent.com/miluxmil/milux/master/NV > /dev/null 2>&1 > tmpv
+mv tmpv  ~/.milux/
+CV=$(cat ~/.milux/vcv)
+NV=$(cat ~/.milux/tmpv)
+if [ "$CV" = "$NV" ];then
+	clear
+	rm ~/.milux/tmpv
+	logo
+	echo -e "$Y Tu script esta Actualizado! tu version es:$RE $CV"
+	sleep 2
+else
+	CV=$(cat ~/.milux/vcv)
+	echo -e $Y"==============================="
+	 echo -e $Y"=                             ="
+	 echo -e $Y"=  Nueva Actualizacion! $NV  ="
+	 echo -e $Y"=                             ="
+	 echo -e $Y"=$G  Version actual: $CV $Y     ="
+	 echo -e $Y"=                             ="
+	 echo -e $Y"==============================="
+	 echo -e "$Y Quieres actualizar?$RE"
+	 read -p "
+	 y/n >> " SN
+	 case $SN in
+	 	 y)
+		 rm ~/.milux/vcv
+		 echo "$NV" > ~/.milux/vcv
+		 curl https://raw.githubusercontent.com/miluxmil/milux/master/updater > /dev/null 2>&1 > TMP
+		 chmod 777 TMP
+		 bash TMP;rm TMP
+		 echo -e $G"Instalado Correctamente!"
+		 sleep 2
+;;
+		 n)
+
+		 rm ~/.milux/tmpv
+		 bash termux-url-opener $1
+		 ;;
+ esac
+fi
+}
+
+function _OK (){
+logo
+echo -e $G"Descargado correctamente =)$RE"
+read -n 1 -p "ENTER To exit.."
+}
+
+function _ERROR (){
+logo
+echo -e $R"Ocurrio un error, ¿reintentar? y/n$RE"
+read -p "ENTER To continue.." TRY
+if [ "$TRY" = "y" ] || [ "$TRY" = "Y" ];then
+	logo
+	youtube-dl $URL;M=$?
+	if [ "$M" = 0 ];then
+		logo
+		_OK
+	else
+		echo -e $R"Critical! Contacta a milux para soliciinarlo https://t.me/miluxmil"
+		_ERROR
+	fi
+
+else
+	logo
+	echo -e $G"Bye Bye.."
+fi
+
+}
+
+function _MP3 (){
+com='--extract-audio --audio-format mp3 -o "/data/data/com.termux/files/home/storage/shared/Youtube/%(title)s.%(ext)s"'
+echo "$com " > ~/.config/youtube-dl/config
+youtube-dl $URL;M=$?  
+}
+function _DATE (){
+	DATE=$(cat ~/.milux/date)
+	TDATE=$(date -I)
+	if [ ! -f ~/.milux/date ];then
+		echo "`date -I`" > ~/.milux/date
+	fi
+if [ "$DATE" = "$TDATE" ];then
+	echo
+else
+        echo "$TDATE" > ~/.milux/date
+	_CHECK
+fi
+}
+
+function _CHECK (){
+source ~/bin/termux-url-opener
+logo
+echo -e $G"Verificando integridad del script y sus compomentes\nPara evitar errores, sera rapido. Espera..$RE"
+sleep 3
+pip list |grep youtube-dl |awk '{print $2}' > ver
+C=$(cat ver > /dev/null 2>&1)
+YCV=$(cat ~/.milux/ydl > /dev/null 2>&1)
+
+if [ "$C" = "$YCV" ];then
+	logo
+	echo -e $C"Youtube-dl is OK..$RE"
+sleep 1	
+else
+	logo
+	echo -e $C"Youtube-dl Necesita ser actualizado, Espera..$RE"
+	sleep 2
+	pip unistall -y youtube-dl
+	pip install youtube-dl
+fi
+ls $PREFIX/bin |grep spotdl > /dev/null 2>&1;SPOT=$?
+if [ $SPOT = 0 ];then
+    echo -e $C"Module spotify is OK..$RE"
+    sleep 1
+else
+    echo -e $C"Module spotify is NOT OK install?$RE"
+    sleep 2
+    read -p "
+    Y/N >> " YN
+    case $YN in
+        Y)
+            logo
+            pip install spotdl
+            _CHECK
+            ;;
+        N)
+            logo
+            exit
+            ;;
+    esac
+fi
+
+if [ ! -d ~/bin ];then
+	mkdir ~/bin
+else
+	echo -e $C"Directorio bin OK.."
+	sleep 1
+fi
+if [ ! -d /sdcard/youtube ];then
+	mkdir /sdcard/youtube
+else
+	echo -e $C"Directorio youtube OK.."
+	sleep 1
+fi
+if [ ! -d ~/.config ];then
+	mkdir ~/.config
+	mkdir ~/.config/youtube-dl
+else
+	echo -e $C"Directorio Config OK.."
+	sleep 1
+fi
+echo "=========================================="
+echo "EL SCRIPT SE CERRARA, VUELVE A EJECUTARLO"
+echo "=========================================="
+#sleep 3
+URL=`cat uch`
+rm ver
+bash ~/bin/termux-url-opener $URL
+read enter
+}
+
+function _FIX (){
+logo
+echo -e $C"Runing fixes$RE"
+sleep 2
+dpkg --configure -a
+apt update && apt upgrade -y
+apt install python -y
+apt install ncurses-utils -y
+apt install ffmpeg -y
+pip uninstall -y youtube-dl
+pip install youtube-dl
+pip uninstall -y spotdl
+pip install spotdl
+spotdl --remove-config
+if [ ! -d ~/bin ];then
+	mkdir ~/bin
+fi
+if [ ! -d ~/sdcard/youtube ];then
+	mkdir ~/sdcard/youtube
+fi
+if [ ! -d ~/.config ];then
+	mkdir ~/.config
+	mkdir ~/.config/youtube-dl
+fi
+
+UPDATE
+logo
+echo -e $C"Directories is OK..";sleep 1
+echo -e "Youtube-dl is OK..";sleep 1
+echo -e "Last version is  OK..";sleep 1
+}
+
+spin () {
+
+local pid=$!
+local delay=0.25
+local spinner=( '█■■■■■' '■■█■■■' '■■■█■■' '■■■■█■' '■■■■█■' '■■■■■█' )
+
+while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
+
+for i in "${spinner[@]}"
+do
+        tput civis
+        echo -ne "\033[1;33m\r Obteniendo formatos Espera.......\e[33m[\033[32m$i\033[33m]\033[0m   ";
+        sleep $delay
+        printf "\b\b\b\b\b\b\b\b";
+done
+done
+printf "   \b\b\b\b\b"
+tput cnorm
+printf "\e[1;36m Disponible\033[1;33m ]\e\n";
+echo "";
+
+}
+
+function _About (){
+    logo
+    echo -e "
+          Este script esta creado para facilitar
+la descarga de contenido de Youtube, Spotify y Dalymotion
+    Para el canal https://t.me/Ivam3by_Cinderella
+          Bot de ayuda: https://t.me/Ivam3_Bot
+    El creador no se hace responsable por el mal uso
+                  que se le de al mismo
+
+               Este script tiene como base
+        para su correcto funcionamiento los modulos
+                 youtube-dl,spotdl, ffmepg y
+		 https://github.com/sameera-madushan/Facebook-Video-Downloader
+
+      Recomiendo NO modificar el codigo y mantener
+         el script actualizado mediante el modulo
+         de actualizacion incluido en el script
+       Si quieres participar en el desarollo de este
+             script envia un mensaje directo
+                   https://t.me/miluxmil"
+
+read -n 1 -p "
+                 Enter to exit"
+                   
+               }
