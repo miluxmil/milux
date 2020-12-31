@@ -71,7 +71,9 @@ Para usar la funciin de facebook, sigue estos pasos
 1.- Abre termux 
 2.- escribe: fdl
 3.- das enter e ingresa la url del video
-4.- sigue las instrucciones 
+4.- sigue las instrucciones
+
+* Si hay un error usa la opcion Fix"
 read -n 1 -p "
 ENTER para salir"
 
