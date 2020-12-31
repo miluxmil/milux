@@ -2,7 +2,9 @@
 if [[ ! -d ~/.milux ]];then
 mkdir ~/.milux
 fi
-
+echo -e "#!/data/data/com.termux/files/usr/bin/python\npython ~/bin/downloader.py" > fdl
+chmod 777 fdl
+mv fdl $PREFIX/bin/
 cd ~/.milux
 
 curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener;VAR1=$? 
@@ -23,6 +25,16 @@ if [ $VAR2 = 0 ];then
 	echo "Update... OK"
 	sleep 1
 	mv update ~/bin/
+else
+	echo "ocurrió un problema"
+	sleep 3
+	exit
+fi 
+curl https://raw.githubusercontent.com/miluxmil/milux/master/downloader.py > /dev/null 2>&1 > downloader.py;VAR3=$?
+if [ $VAR3 = 0 ];then
+	echo "Downloader.. OK"
+	sleep 1
+	mv downloader.py ~/bin/
 else
 	echo "ocurrió un problema"
 	sleep 3
@@ -49,7 +61,17 @@ Lista de cambios$RE
 * Errores menores
 26/jun/2020
 * Comprobación más completa
-* Errores menores"
+* Errores menores
+30/12/2020
+* Descarga videos facebook
+* Informacion mas completa
+* Optimizaciones
+
+Para usar la funciin de facebook, sigue estos pasos
+1.- Abre termux 
+2.- escribe: fdl
+3.- das enter e ingresa la url del video
+4.- sigue las instrucciones 
 read -n 1 -p "
 ENTER para salir"
 
