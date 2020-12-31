@@ -2,7 +2,7 @@
 if [[ ! -d ~/.milux ]];then
 mkdir ~/.milux
 fi
-echo -e '#!/data/data/com.termux/files/usr/bin/bash\nsource ~/bin/termux-url-opener\nsource ~/bin/update\nlogo\n\nread -n 1 -p "Press enter to continue.." $RE\npython ~/bin/downloader.py' > fdl
+echo -e '#!/data/data/com.termux/files/usr/bin/bash\nsource ~/bin/termux-url-opener\nsource ~/bin/update\nlogo\n\nread -n 1 -p "Press enter to continue.."\npython ~/bin/downloader.py' > fdl
 chmod 777 fdl
 mv fdl $PREFIX/bin/
 cd ~/.milux
