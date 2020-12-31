@@ -185,6 +185,8 @@ pip uninstall -y youtube-dl
 pip install youtube-dl
 pip uninstall -y spotdl
 pip install spotdl
+pip install tqdm==4.43.0
+pip install requests==2.20.1
 spotdl --remove-config
 if [ ! -d ~/bin ];then
 	mkdir ~/bin
