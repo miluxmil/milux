@@ -1,0 +1,63 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+if [[ ! -d ~/.milux ]];then
+mkdir ~/.milux
+fi
+
+{
+	echo -e "XXX\n0\nInstalando FDL... \nXXX"
+	sleep 2
+	echo -e '#!/data/data/com.termux/files/usr/bin/bash\nsource ~/bin/termux-url-opener\nsource ~/bin/update\nlogo\n\nread -n 1 -p "Press enter to continue..."\npython ~/bin/downloader.py' > fdl;chmod 777 fdl;mv fdl $PREFIX/bin/;cd ~/.milux
+	curl https://raw.githubusercontent.com/miluxmil/milux/master/downloader.py > /dev/null 2>&1 > downloader.py;VAR3=$?
+if [ $VAR3 = 0 ];then
+	echo -e "XXX\n25\nFDL... OK.\nXXX"
+	mv downloader.py ~/bin/
+	sleep 1
+else
+	echo -e "XXX\n25\nOcurrio un problema :X.\nXXX"
+	sleep 3
+	exit
+fi 
+
+
+echo -e "XXX\n25\nInstalando ultima version...\nXXX"
+sleep 2
+curl https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1 > termux-url-opener;VAR1=$?
+if [ $VAR1 = 0 ];then
+	echo -e "XXX\n50\nScript actualizado...\nXXX"
+	sleep 1
+	chmod 777 termux-url-opener
+	mv termux-url-opener ~/bin/
+else
+	echo -e "XXX\n50\nOcurrio un problema :X.\nXXX"
+	sleep 3
+	exit 1
+fi
+
+
+echo -e "XXX\n50\nInstalando Ajustes...\nXXX"
+sleep 2
+curl https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null 2>&1 > update;VAR2=$?
+
+if [ $VAR2 = 0 ];then
+	echo -e "XXX\n75\nAjustes..   OK.\nXXX"
+	sleep 1
+	mv update ~/bin/
+else
+	echo -e "XXX\n75\nOcurrio un problema :X.\nXXX"
+	sleep 3
+	exit
+fi
+
+echo -e "XXX\n75\nVerificando integridad..\nXXX"
+sleep 3
+echo -e "XXX\n100\nImstalado Correctamente..\nXXX"
+
+} |whiptail --title "-Milux- Installer-" --gauge "Please wait while installing" 6 60 0
+
+clear
+whiptail --title "-Milux- Installer" \
+         --msgbox "Gracias por instalar mi script\nhttps:/t.me/miluxmil\nToca OK para finalizar" 6 60
+clear
+
+
