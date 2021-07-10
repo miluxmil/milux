@@ -209,7 +209,7 @@ function _Update(){
 	mv ccv.mlx ~/.milux/ccv.mlx
 	CAV=$(cat ~/.milux/ccv.mlx)
 	CCV=$(cat ~/.milux/tmp.mlx)
-	if [ $CAV = $CCV ] then
+	if [ $CAV = $CCV ];then
 		_Logo
 		echo -e $G"Tienes la ultima version$RE"
 		sleep 2
