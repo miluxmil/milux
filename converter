@@ -208,7 +208,7 @@ function _Update(){
 	curl https://raw.githubusercontent.com/miluxmil/milux/master/CCV > /dev/null 2>&1 > ccv.mlx
 	mv ccv.mlx ~/.milux/ccv.mlx
 	CAV=$(cat ~/.milux/ccv.mlx)
-	CCV=$(cat ~/.milux/tmp.mlx)
+	CCV=$(cat ~/.milux/cav.mlx)
 	if [ "$CAV" = "$CCV" ];then
 		_Logo
 		echo -e $G"Tienes la ultima version$RE"
