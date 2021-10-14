@@ -6,7 +6,7 @@ _Colors
 if [ "$URL" = "--install" ];then
 	command -v wget > /dev/null 2>&1 || { echo >&2 "Installing WGET";sleep 2; apt install wget -y; }
 	wget https://raw.githubusercontent.com/miluxmil/milux/master/installer > /dev/null 2>&1
-	bash installer;rm installler
+	bash installer;rm installer
 fi
 
 C='\033[1;36m'
