@@ -1,0 +1,222 @@
+#!/data/data/com.termux/files/usr/bin/bash
+
+# Colors
+C='\033[1;36m'
+G='\033[1;32m'
+R='\033[1;31m'
+Y='\033[1;33m'
+B='\033[1;34m'
+P='\033[1;35m'
+RE='\033[0m'
+
+FI=0
+SDL=0
+YDL=0
+FDL=0
+
+function _FDL {
+	_Dir
+}
+
+function _Dir (){
+        _Logo
+        echo -e $G"[$RE *$G ]$RE Getting permissions to memory..\n        Press OK or Accept or y"
+        sleep 1
+        termux-setup-storage;P=$?
+        if [ $P = 0 ];then
+		_Logo
+                echo -e $G"[$RE *$G ]$RE Permissions OK.."
+                sleep 0.5
+        else
+		_Logo
+                echo -e $G"[$R X$G ]$R Could not obtain permissions, Exiting.. Try again$RE"
+                sleep 0.5;exit
+        fi
+        if [ ! -d ~/.milux ];then
+                mkdir ~/.milux
+        fi
+        if [ ! -d ~/bin ];then
+                mkdir ~/bin
+        fi
+        if [ ! -d ~/.config/youtube-dl ];then
+                mkdir -p ~/.config/youtube-dl
+        fi
+        if [ ! -d /sdcard/youtube ];then
+                mkdir /sdcard/youtube
+        fi
+	if [ ! -f ~/.milux/vcv ];then
+		echo "v-1.0" > ~/.milux/vcv
+	fi
+}
+
+function _Update {
+echo -e "$G"
+_Logo
+echo -e $G"[$RE *$G ]$RE Looking for the newest version"
+sleep 0.5
+echo -e $G"[$RE *$G ]$RE Please.. Wait.."
+sleep 0.5
+curl https://raw.githubusercontent.com/miluxmil/milux/master/NV > /dev/null 2>&1 > tmpv
+mv tmpv  ~/.milux/
+CV=$(cat ~/.milux/vcv)
+NV=$(cat ~/.milux/tmpv)
+if [ "$CV" = "$NV" ];then
+        clear
+        rm ~/.milux/tmpv
+        _Logo
+        echo -e $G"[$RE *$G ]$RE You have the latest version"
+	sleep 0.5
+else
+        CV=$(cat ~/.milux/vcv)
+         echo -e $Y"==============================="
+         echo -e $Y"=                             ="
+         echo -e $Y"=  New Version Found!  $NV  ="
+         echo -e $Y"=                             ="
+         echo -e $Y"=$G  Current Version: $CV $Y    ="
+         echo -e $Y"=                             ="
+         echo -e $Y"==============================="
+         echo -e "$Y Do you want to Update?$RE"
+         read -p "
+         y/n >> " SN
+         case $SN in
+                 y)
+                 rm ~/.milux/vcv
+                 echo "$NV" > ~/.milux/vcv
+                 curl https://raw.githubusercontent.com/miluxmil/milux/master/updater > /dev/null 2>&1 > TMP
+                 chmod 777 TMP
+                 bash TMP;rm TMP
+                 echo -e $G"[$RE *$G ]$RE Installed successfully!"
+		 sleep 0.5
+;;
+                 n)
+
+                 rm ~/.milux/tmpv
+                 bash ~/bin/termux-url-opener $1
+                 ;;
+ esac
+fi
+}
+
+function _Upgrade {
+	dpkg --configure -a
+	apt update
+repo=$(apt list --upgradable|awk -F "/" '{print $1}'|sed 's|ruby||g'|grep -v Listing...)
+for i in ${repo[*]};do
+        yes|apt install $i
+done
+}
+
+function _Logo {
+        clear
+        echo -e $G "
+##############################################
+##                                          ##
+##$RE      Y D L  -  D O W N L O A D E R$G       ##
+##$R                            by -Milux-$G    ##
+##                                          ##
+##$RE   Youtube   -  Spotify   -   Dalymotion$G  ##
+##$RE              - Facebook -       $G         ##
+##############################################
+                        $RE       Version:$B $VA $G
+//////////////////////////////////////////////"
+echo -e "$RE"
+}
+
+function _Dep {
+	_Logo
+	echo -e $G"[$RE *$G ]$RE Updating and installing packages\n     this may take a while"
+	sleep 1
+	_Upgrade
+	command -v python > /dev/null 2>&1 || { echo >&2 "Installing python";sleep 2; apt install python -y; }
+	command -v ncurses-utils > /dev/null 2>&1 || { echo >&2 "Installing ncurses-utils";sleep 2; apt install ncurses-utils -y; }
+	command -v ffmpeg > /dev/null 2>&1 || { echo >&2 "Installing ffmpeg";sleep 2; apt install ffmpeg -y; }
+	pip install --upgrade pip
+	pip uninstall -y youtube-dl
+	pip install youtube-dl
+	apt remove nodejs -y
+	apt install nodejs -y
+	npm install -g spotify-dl
+	pip install tqdm==4.43.0
+	pip install requests==2.20.1
+	sed -i "1d" $PREFIX/bin/spotifydl
+	sed -i '1i\#!/data/data/com.termux/files/usr/bin/env nod
+e' $PREFIX/bin/spotifydl
+_Logo
+echo -e $G"[$RE *$G ]$RE All dependencies were successfully installed"
+sleep 1
+}
+
+MODULES=$(whiptail --title "-Milux Installer-" \
+               --checklist "Elige uno o varias Opciones" 12 80 4 \
+               "FULL" "Instalar Todo" OFF \
+               "FDL" "Solo instalar Facebook Downloader" OFF \
+               "SDL" "Solo instalar Spotify Downloader" OFF \
+               "YDL" "Solo instalar YDL - Downloader" OFF \
+	       "UP" "Update" OFF \
+               3>&1 1<&2 2>&3)
+for m in $MODULES;do
+	if [ "$m" = "FULL" ];then
+#		_Dir;_Dep;_Update
+		exit
+	elif [ "$m" = "FDL" ];then
+		_Logo
+		echo -e $G"[$RE *$G ]$RE Updating packages and installing dependeces"
+		sleep 2
+		_Upgrade
+		command -v wget > /dev/null 2>&1 || { echo >&2 "Installing WGET";sleep 2; apt install wget -y; }
+		_Dir
+		echo -e '#!/data/data/com.termux/files/usr/bin/bash\nsource ~/bin/termux-url-opener\nsource ~/bin/update\nlogo\n\nread -n 1 -p "Press enter to continue..."\npython ~/bin/downloader.py' > fdl;chmod 777 fdl;mv fdl $PREFIX/bin/;cd ~/.milux
+		wget https://raw.githubusercontent.com/miluxmil/milux/master/downloader.py > /dev/null 2>&1
+		wget https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1
+		wget https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null 2>&1
+		mv downloader.py update termux-url-opener ~/bin/
+		_Logo
+		echo -e $G"[$RE *$G ]$RE Facebook-DL was successfully installed"
+		sleep 2;exit
+	elif [ $m = "SDL" ];then
+		_Logo
+		echo -e $G"[$RE *$G ]$RE Updating packages and installing dependeces"
+		sleep 2
+		_Upgrade
+		command -v wget > /dev/null 2>&1 || { echo >&2 "Installing WGET";sleep 2; apt install wget -y; }
+		_Dir
+		apt install nodejs -y 
+		npm install -g spotify-dl
+		pip install tqdm==4.43.0
+		pip install requests==2.20.1
+		sed -i "1d" $PREFIX/bin/spotifydl
+		sed -i '1i\#!/data/data/com.termux/files/usr/bin/env node' $PREFIX/bin/spotifydl
+			_Logo
+			echo -e $G"[$RE *$G ]$RE Spotify-DL was successfully installed"
+		sleep 2;exit
+
+	elif [ "$m" = "YDL" ];then
+		_Logo
+		echo -e $G"[$RE *$G ]$RE Updating packages and installing dependeces"
+		sleep 2
+		_Upgrade
+		command -v wget > /dev/null 2>&1 || { echo >&2 "Installing WGET";sleep 2; apt install wget -y; }
+		command -v python > /dev/null 2>&1 || { echo >&2 "Installing python";sleep 2; apt install python -y; }
+		pip install --upgrade pip
+		pip uninstall -y youtube-dl
+		pip install youtube-dl
+		_Dir
+		wget https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/nul
+		wget https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null
+		chmod 777 termux-url-opener
+		mv termux-url-opener update ~/bin/
+		_Logo
+		echo -e $G"[$RE *$G ]$RE Youtube-DL was successfully installed"
+		sleep 2;exit
+	elif [ "$m" = "UP" ];then
+		_Update
+	fi
+	done
+
+if [ -z $MODULES ];then
+	_Logo
+	echo -e $G"[$RE *$G ]$RE You've cancelled, see you later"
+	sleep 2
+	exit
+fi
+
