@@ -56,8 +56,7 @@ echo -e "XXX\n100\nImstalado Correctamente..\nXXX"
 } |whiptail --title "-Milux- Installer-" --gauge "Please wait while installing" 6 60 0
 
 clear
-whiptail --title "-Milux- Installer" \
-         --msgbox "Gracias por instalar mi script\nAhora podrás instalar y/o actualizar ejecutando el archivo\n termux-url-opener, ejemplo: bash termux-url-opener --install\nhttps:/t.me/miluxmil\nToca OK para finalizar" 6 60
+ whiptail --title "-Milux- Installer"          --msgbox "Gracias por instalar mi script\nAhora podrás instalar y/o actualizar ejecutando el archivo termux-url-opener\n Ejemplo: bash termux-url-opener --install\nPodras instalar solo el modulo que te interese o completamente\nhttps:/t.me/miluxmil\nToca OK para finalizar" 12 60
 clear
 
 
