@@ -57,7 +57,7 @@ echo -e "XXX\n100\nImstalado Correctamente..\nXXX"
 
 clear
 whiptail --title "-Milux- Installer" \
-         --msgbox "Gracias por instalar mi script\nhttps:/t.me/miluxmil\nToca OK para finalizar" 6 60
+         --msgbox "Gracias por instalar mi script\nAhora podrás instalar y/o actualizar ejecutando el archivo\n termux-url-opener, ejemplo: bash termux-url-opener --install\nhttps:/t.me/miluxmil\nToca OK para finalizar" 6 60
 clear
 
 
