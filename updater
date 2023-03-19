@@ -1,5 +1,6 @@
 #!/data/data/com.termux/files/usr/bin/bash
-
+rm -rf ~/bin/termux-url-opener
+rm -rf ~/bin/update
 wget https://raw.githubusercontent.com/miluxmil/milux/master/termux-url-opener > /dev/null 2>&1
 wget https://raw.githubusercontent.com/miluxmil/milux/master/update > /dev/null 2>&1
 chmod 777 termux-url-opener
