@@ -133,7 +133,7 @@ function _Dep {
 	command -v ffmpeg > /dev/null 2>&1 || { echo >&2 "Installing ffmpeg";sleep 2; apt install ffmpeg -y; }
 	pip install --upgrade pip
 	pip uninstall -y youtube-dl
-	pip install youtube-dl
+	pip install yt-dlp
 	apt remove nodejs -y
 	apt install nodejs -y
 	npm install -g spotify-dl
