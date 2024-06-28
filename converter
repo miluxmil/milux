@@ -132,7 +132,7 @@ function _Video(){
 function _Continue() {
 	_Logo
 	ls -p $RUTA | grep -v / |cat -n
-	echo -e $G"PRESS 5 TO REFRESH..
+	echo -e $G"PRESS * TO REFRESH..
 	"
 	while read -p "Selecciona una opcion >> " OPTION && [ -z $OPTION ];do
 	echo -e $R"[!]$Y Debes ingresar una opcion$RE"
@@ -140,7 +140,7 @@ function _Continue() {
 
 FILE2=$(ls $RUTA |sed "$OPTION q;d" |cut -d ";" -f2,6)
 
-if [ $OPTION = 5 ];then
+if [ $OPTION = * ];then
 	_Continue
 fi
 
