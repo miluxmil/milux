@@ -12,6 +12,8 @@ B='\033[1;34m'
 P='\033[1;35m'
 RE='\033[0m'
 
+#trap "ctl_c" SIGINT
+
 command -v ffmpeg > /dev/null 2>&1 || { echo >&2 "Al parecer no tienes FFMPEG, espera";sleep 2;apt install -y ffmpeg;bash $0 ; }
 command -v mogrify > /dev/null 2>&1 || { echo >&2 "Al parecer no tienes imagemagick, espera" ; sleep 2 ; apt install -y imagemagick ; bash $0 ; }
 
@@ -31,6 +33,14 @@ echo -e "
 
 }
 
+function ctl_c(){
+_Logo
+echo -e "$G Saliendo de Converter...";sleep 2
+_Logo
+echo -e "OK, BYE BYE!";exit
+
+}
+
 
 spin () {
 local pid=$!
@@ -43,7 +53,7 @@ while [ "$(ps a | awk '{print $1}' | grep $pid)" ]; do
 	for i in "${spinner[@]}"
 	do
 		tput civis
-		echo -ne "\033[1;33m\r Convirtiendo, ten paciencia............\e[33m[\033[32m$i\033[33m]\033[0m   ";
+		echo -ne "\033[1;33m\r Convirtiendo, ten paciencia......\e[33m[\033[32m$i\033[33m]\033[0m   ";
 		sleep $delay
 		printf "\b\b\b\b\b\b\b\b";
 	done
@@ -66,7 +76,7 @@ function _Menu() {
 	[$RE 9$G ]$Y Actualizar..$G
 	[$RE 0$G ]$Y Salir $G
 	"
-	read -p " >> " OPT
+	read -p "-Milux- Convert >> " OPT
 
 	case $OPT in
 		1)
@@ -88,9 +98,7 @@ function _Menu() {
 			_Update
 			;;
 		0)
-			_Logo
-			echo -e $G"bye bye.."
-			exit
+			ctl_c
 			;;
 	esac
 
@@ -116,11 +124,11 @@ fi
 }
 
 function _Music() {
-	_Logo
-	ffmpeg -i $RUTA/"$FILE2" -y "$RUTA/${FILE2%.*}".$EXIT > /dev/null 2>&1 > ~/.milux/formats.mlx  & spin
+	ffmpeg -i $RUTA/"$FILE2" -y "$RUTA/${FILE2%.*}".$EXIT > /dev/null 2>&1  & spin
 }
 
 function _Image(){
+	_Logo
 	echo -e $G"Convirtiendo espera..."
 mogrify -format $EXIT $RUTA/"$FILE2" 
 }
@@ -132,32 +140,55 @@ function _Video(){
 function _Continue() {
 	_Logo
 	ls -p $RUTA | grep -v / |cat -n
-	echo -e $G"PRESS r TO REFRESH..
-	"
+	echo -e $G"
+PRESS r TO REFRESH...
+PRESS p TO NEW PATH | PRESS n TO NEW CONVERSION 
+"
 	while read -p "Selecciona una opcion >> " OPTION && [ -z $OPTION ];do
 	echo -e $R"[!]$Y Debes ingresar una opcion$RE"
 	done
 
-FILE2=$(ls $RUTA |sed "$OPTION q;d" |cut -d ";" -f2,6)
-
-if [ $OPTION = r ];then
+if [ $OPTION = r ]||[ $OPTION = R ];then
 	_Continue
 fi
+
+if [ $OPTION = p ]||[ $OPTION = P ];then
+	_Main
+fi
+
+if [ $OPTION = n ]||[ $OPTION = N ];then
+	_Menu
+fi
+
+FILE2=$(ls $RUTA |sed "$OPTION q;d" |cut -d ";" -f2,6)  
 
 if [ -d "$RUTA/$FILE2" ];then
 	echo -e $Y"[X]$R Error! Seleccionaste un directorio\nreiniciando script$C";sleep 3;bash $0
 fi
 
 _Logo
-echo -e "$Y Ingresa el formato de salida,$RE Ejemplo:$C $FR1, $FR2, $FR3 etc.$RE"
-while read -p " >> " EXIT && [ -z $EXIT ];do
+echo -e "$Y Ingresa el formato de salida,$RE Ejemplo:$C $FR1, $FR2, $FR3 etc.$RE
+
+$G O presiona$Y D$G para eliminar el archivo seleccionado$RE
+
+$G Archivo seleccionado:$RE $FILE2 $G
+"
+while read -p " -Milux- convert >> " EXIT && [ -z $EXIT ];do
 echo -e $R"[X]$Y No escribiste nada o Formato incopatible $RE";sleep 1
 done
 
+if [ $EXIT = d ]||[ $EXIT = D ];then
+	rm "$RUTA/$FILE2"
+	_Logo
+	echo -e "$R ¡Archivo eliminado con exito!"
+	sleep 2
+	_Continue
+fi
+
 _Logo
 echo -e $G"La informacion, es correcta? s/n"
-echo -e $G"Archivo:$Y $FILE2 $RE";sleep 1
-echo -e $G"Formato:$Y $EXIT $RE";sleep 1
+echo -e $G"Archivo:$Y $FILE2 $RE";sleep 0.5
+echo -e $G"Formato:$Y $EXIT $RE";sleep 0.5
 while read -p " S o N >> " SINO && [ -z $SINO ];do                    echo -e $R"[X]$Y No escribiste nada$C"
 	sleep 1
 done
@@ -171,6 +202,7 @@ if [ $SINO = "s" ] || [ $SINO = "S" ] || [ $SINO = "y" ] || [ $SINO = "Y" ];then
 	elif [ "$MODE" = "- Video -" ];then
 		_Video
 	fi
+
 	_Logo
 	echo -e $G"Archivo original:$RE "$FILE2""
 	echo -e $G"Deseas conservar el archivo original?"
@@ -188,6 +220,8 @@ if [ $SINO = "s" ] || [ $SINO = "S" ] || [ $SINO = "y" ] || [ $SINO = "Y" ];then
 		sleep 2
 		_Continue
 	fi
+elif [ $SINO = "n" ] || [ $SINO = "N" ];then
+	_Continue
 fi
 }
 
@@ -263,5 +297,5 @@ function _Update(){
 
 
 }
-	
+trap "ctl_c" SIGINT	
 _Menu
