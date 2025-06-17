@@ -3836,8 +3836,8 @@ function _Update() {
     echo -e $C"Descargando actualización..."
     
     # Descargar componentes
-    curl -s -o https://raw.githubusercontent.com/miluxmil/milux/master/CHANGELOG -o ~/.milux/changelog.txt
-    curl -s -o ~/.milux/converter.tmp https://raw.githubusercontent.com/miluxmil/milux/master/converter
+    curl -s https://raw.githubusercontent.com/miluxmil/milux/master/CHANGELOG -o ~/.milux/changelog.txt
+    curl -s https://raw.githubusercontent.com/miluxmil/milux/master/converter -o ~/.milux/converter.tmp
     
     if [ ! -s ~/.milux/converter.tmp ]; then
         echo -e $R"Error: No se pudo descargar la actualización$RE"
