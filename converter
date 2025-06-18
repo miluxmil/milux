@@ -3818,7 +3818,7 @@ function _Update() {
     sleep 1
     
     # Descargar información de versión
-    curl -s https://raw.githubusercontent.com/miluxmil/milux/master/CCV -o ~/.milux/ccv.mlx
+    curl -s -o ~/.milux/ccv.mlx https://raw.githubusercontent.com/miluxmil/milux/master/CCV
     REMOTE_VERSION=$(cat ~/.milux/ccv.mlx)
     LOCAL_VERSION=$(cat ~/.milux/cav.mlx)
     
@@ -3836,8 +3836,8 @@ function _Update() {
     echo -e $C"Descargando actualización..."
     
     # Descargar componentes
-    curl -s https://raw.githubusercontent.com/miluxmil/milux/master/CHANGELOG -o ~/.milux/changelog.txt
-    curl -s https://raw.githubusercontent.com/miluxmil/milux/master/converter -o ~/.milux/converter.tmp
+    curl -s -o ~/.milux/changelog.txt https://raw.githubusercontent.com/miluxmil/milux/master/CHANGELOG
+    curl -s -o ~/.milux/converter.tmp https://raw.githubusercontent.com/miluxmil/milux/master/converter
     
     if [ ! -s ~/.milux/converter.tmp ]; then
         echo -e $R"Error: No se pudo descargar la actualización$RE"
@@ -3858,7 +3858,7 @@ function _Update() {
     echo -e $G"¡Actualización completada!$RE"
     echo -e $Y"Reiniciando CONVERTER v$REMOTE_VERSION$RE"
     sleep 3
-    exec "$0"  # Usar exec para reemplazar completamente el proceso
+    exec "$0"
 }
 
 function _ShowChangelog() {
