@@ -1,0 +1,3019 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+import os
+import sys
+import subprocess
+import time
+import json
+import shutil
+import glob
+import re
+import threading
+import hashlib
+import zipfile
+import base64
+import socket
+from datetime import datetime
+from pathlib import Path
+
+class CryptoManager:
+    """Gestiona el cifrado y descifrado de datos sensibles como las claves de API."""
+    def __init__(self):
+        # Usamos un salt fijo y un ID único del sistema para generar una clave robusta.
+        self.salt = b'converter_milux_dnp_2024'
+        self.key = self._generate_key()
+
+    def _get_unique_id(self):
+        """Obtiene un identificador único y estable del sistema para la generación de la clave."""
+        try:
+            
+            id_path = os.path.expanduser("~/.gemini/installation_id")
+            if os.path.exists(id_path):
+                with open(id_path, 'r') as f:
+                    return f.read().strip()
+            return socket.gethostname()
+        except Exception:
+            return "default_converter_host"
+
+    def _generate_key(self):
+        """Genera una clave de cifrado de 32 bytes usando SHA-256."""
+        unique_id = self._get_unique_id().encode('utf-8')
+        return hashlib.sha256(self.salt + unique_id).digest()
+
+    def encrypt(self, plaintext):
+        """Cifra un texto plano usando un XOR simple con la clave y lo codifica en Base64."""
+        if not plaintext:
+            return None
+        
+        if isinstance(plaintext, str):
+            plaintext = plaintext.encode('utf-8')
+            
+        encrypted = bytearray()
+        for i in range(len(plaintext)):
+            encrypted.append(plaintext[i] ^ self.key[i % len(self.key)])
+        
+        return base64.b64encode(encrypted).decode('utf-8')
+
+    def decrypt(self, ciphertext):
+        """Descifra un texto cifrado en Base64."""
+        if not ciphertext:
+            return None
+        
+        try:
+            encrypted_bytes = base64.b64decode(ciphertext)
+            decrypted = bytearray()
+            for i in range(len(encrypted_bytes)):
+                decrypted.append(encrypted_bytes[i] ^ self.key[i % len(self.key)])
+            return decrypted.decode('utf-8')
+        except (base64.binascii.Error, UnicodeDecodeError):
+            return ciphertext
+
+class Converter:
+    def __init__(self):
+        self.COLORS = {
+            'C': '\033[1;36m',  # Cyan
+            'G': '\033[1;32m',  # Green
+            'R': '\033[1;31m',  # Red
+            'Y': '\033[1;33m',  # Yellow
+            'B': '\033[1;34m',  # Blue
+            'P': '\033[1;35m',  # Purple
+            'RE': '\033[0m',    # Reset
+        }
+        self.PROJECTS_DIR = os.path.expanduser("~/ConverterProjects")
+        self.CURRENT_PROJECT = ""
+        self.PROJECT_CONFIG = "project.cfg"
+        self.YEAR = datetime.now().year
+        self.FORMATOS = self.get_supported_formats()
+        self.PROFILES = {
+            '1': {'name': 'Video a MP4 (Compatible)', 'mode': '- Video -', 'exit': 'mp4'},
+            '2': {'name': 'Video a Audio MP3', 'mode': '- Extraer Audio -', 'exit': 'mp3'},
+            '3': {'name': 'Imagen a JPG (Alta Compatibilidad)', 'mode': '- Imagen -', 'exit': 'jpg'},
+            '4': {'name': 'Imagen a PNG (Con Transparencia)', 'mode': '- Imagen -', 'exit': 'png'},
+            '5': {'name': 'Audio a MP3 (Estándar)', 'mode': '- Audio -', 'exit': 'mp3'},
+            '6': {'name': 'Audio a OGG (Calidad/Libre)', 'mode': '- Audio -', 'exit': 'ogg'}
+        }
+        self.PROFILE_SELECTED = False
+        self.MODE = ""
+        self.FR1 = ""
+        self.FR2 = ""
+        self.FR3 = ""
+        self.RUTA = ""
+        self.EXIT = ""
+        self.FILES = []
+        self.spinner_running = False
+        self.check_dependencies()
+        self.NOTIF_LOG = os.path.expanduser("~/.milux/notifications.log")
+        self.IA_CONFIG = os.path.expanduser("~/.milux/ia.cfg")
+        self.crypto = CryptoManager() # Gestor de cifrado
+        self.CAV_FILE = os.path.expanduser("~/.milux/cav.mlx") # Local version file
+        self.CCV_FILE = os.path.expanduser("~/.milux/ccv.mlx") # Remote version file
+        self.CHANGELOG_FILE = os.path.expanduser("~/.milux/changelog.txt") 
+        os.makedirs(os.path.expanduser("~/.milux"), exist_ok=True)
+        
+    def get_supported_formats(self):
+        """Obtener formatos compatibles de forma más robusta"""
+        try:
+            # Obtener formatos de ffmpeg de forma segura
+            proc_ffmpeg = subprocess.Popen(['ffmpeg', '-formats'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out_ffmpeg, _ = proc_ffmpeg.communicate()
+        
+            # Mejorar el parsing de formatos
+            ffmpeg_formats = []
+            for line in out_ffmpeg.decode().splitlines():
+                if line.strip() and (line.startswith(' D') or line.startswith(' E') or line.startswith(' DE')):
+                    parts = line.split()
+                    if len(parts) >= 2:
+                        ffmpeg_formats.append(parts[1].lower())
+        
+            # Obtener formatos de ImageMagick de forma segura
+            proc_magick = subprocess.Popen(['identify', '-list', 'format'], stdout=subprocess.PIPE, stderr=subprocess.PIPE)
+            out_magick, _ = proc_magick.communicate()
+            imagemagick_formats = [line.split()[0].lower() for line in out_magick.decode().splitlines() 
+                    if line and not line.startswith(' ') and '.' not in line.split()[0]]
+    
+            all_formats = set(ffmpeg_formats + imagemagick_formats)
+    
+            essential_formats = {'webm', 'mp4', 'mkv', 'avi', 'mov', 'mp3', 'wav', 'ogg', 
+                            'flac', 'jpg', 'jpeg', 'png', 'gif', 'webp'}
+            all_formats.update(essential_formats)
+        
+            # Filtrar formatos vacíos o inválidos
+            all_formats = {fmt for fmt in all_formats if fmt and fmt.isalnum()}
+        
+            return all_formats
+
+        except (subprocess.CalledProcessError, FileNotFoundError, IndexError) as e:
+            print(f"{self.COLORS['R']}Error al obtener formatos (dependencias): {e}{self.COLORS['RE']}")
+            # Fallback con formatos esenciales
+            return {'webm', 'mp4', 'mkv', 'avi', 'mov', 'mp3', 'wav', 'ogg', 'flac', 'jpg', 'jpeg', 'png', 'gif', 'webp'}
+    
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error inesperado al obtener formatos: {e}{self.COLORS['RE']}")
+            # Fallback con formatos esenciales
+            return {'webm', 'mp4', 'mkv', 'avi', 'mov', 'mp3', 'wav', 'ogg', 'flac', 'jpg', 'jpeg', 'png', 'gif', 'webp'}
+
+    def check_dependencies(self):
+        """Verificar dependencias necesarias"""
+        self.logo()
+        print(f"{self.COLORS['G']}Verificando dependencias...{self.COLORS['RE']}\n")
+        essential = ["ffmpeg", "mogrify", "curl", "yt-dlp"]
+        missing = [pkg for pkg in essential if not self.is_installed(pkg)]
+        
+        if missing:
+            print(f"{self.COLORS['R']}Faltan dependencias esenciales:{self.COLORS['RE']}")
+            for pkg in missing:
+                print(f" - {pkg}")
+            self.install_packages(missing)
+            print(f"\n{self.COLORS['G']}Dependencias instaladas.{self.COLORS['RE']}")
+        else:
+            print(f"{self.COLORS['G']}✓ Todas las dependencias esenciales están instaladas.{self.COLORS['RE']}")
+
+    def is_installed(self, package):
+        """Verificar si un paquete está instalado"""
+        return shutil.which(package) is not None
+
+    def install_packages(self, packages):
+        """Instalar paquetes necesarios según el sistema operativo."""
+        print(f"{self.COLORS['Y']}Instalando dependencias...{self.COLORS['RE']}")
+        try:
+            if shutil.which("pkg"): # Entorno Termux/Android
+                command = ["pkg", "install", "-y"] + packages
+                subprocess.run(command, check=True)
+            elif shutil.which("apt-get"): # Entornos Debian/Ubuntu
+                command = ["sudo", "apt-get", "install", "-y"] + packages
+                subprocess.run(command, check=True)
+            elif shutil.which("yum"): # Entornos Red Hat/CentOS
+                command = ["sudo", "yum", "install", "-y"] + packages
+                subprocess.run(command, check=True)
+            elif shutil.which("brew"): # macOS con Homebrew
+                command = ["brew", "install"] + packages
+                subprocess.run(command, check=True)
+            else:
+                print(f"{self.COLORS['R']}No se pudo determinar el gestor de paquetes.{self.COLORS['RE']}")
+                print(f"Por favor, instala manualmente: {', '.join(packages)}")
+                return
+
+            print(f"\n{self.COLORS['G']}Dependencias instaladas.{self.COLORS['RE']}")
+
+        except FileNotFoundError as e:
+            print(f"{self.COLORS['R']}Error: Comando no encontrado ({e.filename}). Asegúrate de que tu gestor de paquetes esté en el PATH.{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}Error al instalar dependencias: {e}{self.COLORS['RE']}")
+
+    def start_custom_spinner(self, mensaje="Convirtiendo, ten paciencia......", file_name=None):
+        """Spinner animado tipo barra de progreso"""
+        self.spinner_running = True
+        spinner_frames = ['█■■■■■', '■█■■■■', '■■█■■■', '■■■█■■', '■■■■█■', '■■■■■█']
+        self.logo()
+        if file_name:
+            try:
+                cols = os.get_terminal_size().columns
+                display_name = f"Se esta convirtiendo: {file_name}"
+                if len(display_name) > cols - 4:
+                    display_name = "..." + display_name[-(cols - 7):]
+                center = (cols - len(display_name)) // 2
+                print(f"{' ' * center}{self.COLORS['C']}{display_name}{self.COLORS['RE']}")
+            except OSError:
+                print(f"{self.COLORS['C']}Se esta convirtiendo: {file_name}{self.COLORS['RE']}")
+    
+        def spinner():
+            i = 0
+            while self.spinner_running:
+                frame = spinner_frames[i % len(spinner_frames)]
+                sys.stdout.write(
+                        f"\r\033[1;33m{mensaje} \033[33m[\033[32m{frame}\033[33m]\033[0m   "
+            )
+                sys.stdout.flush()
+                time.sleep(0.25)
+                i += 1
+
+        # Al detener el spinner
+            sys.stdout.write("\r\033[1;33m [\033[1;36m Operacion OK..\033[1;33m ]\033[0m\n")
+            sys.stdout.flush()
+            time.sleep(1)
+        self.spinner_thread = threading.Thread(target=spinner)
+        self.spinner_thread.start()
+
+    def stop_custom_spinner(self):
+        """Detiene el spinner animado"""
+        self.spinner_running = False
+        if hasattr(self, "spinner_thread"):
+            self.spinner_thread.join()
+
+    def logo(self):
+        """Mostrar logo de la aplicación"""
+        os.system('clear')
+        print(f"""{self.COLORS['P']}
+      \_/
+     (* *)
+    __)#(__
+   ( )...( )(_)  {self.COLORS['G']}C O N V E R T E R{self.COLORS['P']}
+   || |_| ||//     {self.COLORS['G']}      By{self.COLORS['P']}
+>==() | | ()/      {self.COLORS['G']}</[M]iLu{{×}}_> | DNP | {self.YEAR}{self.COLORS['P']}
+    _(___)_
+   [-]   [-]  {self.COLORS['RE']}      Music - Video - Images
+   """)
+
+    def _show_centered_message(self, message, delay=0.02):
+        try:
+            cols = os.get_terminal_size().columns
+            center = (cols - len(message)) // 2
+            os.system('clear')
+            print("\n" * 6)
+            print(" " * center, end="", flush=True)
+        
+            for char in message:
+                print(f"{self.COLORS['C']}{char}{self.COLORS['RE']}", end="", flush=True)
+                time.sleep(delay)
+                if char == "|":
+                    time.sleep(0.5)
+        
+            time.sleep(0.5)
+        except Exception: 
+            print(f"\n\n{self.COLORS['Y']}{message}{self.COLORS['RE']}")
+
+    def main_menu(self):
+        """Menú principal de la aplicación"""
+        while True:
+            self._show_centered_message("CONVERTER | Iniciando", delay=0.02)  # Más rápido
+            self.logo()
+            print(f"""{self.COLORS['G']}
+Elije una opcion
+
+    [{self.COLORS['RE']} 1{self.COLORS['G']} ] {self.COLORS['Y']}Audio{self.COLORS['G']}
+    [{self.COLORS['RE']} 2{self.COLORS['G']} ] {self.COLORS['Y']}Imagen{self.COLORS['G']}
+    [{self.COLORS['RE']} 3{self.COLORS['G']} ] {self.COLORS['Y']}Video{self.COLORS['G']}
+    [{self.COLORS['RE']} 4{self.COLORS['G']} ] {self.COLORS['Y']}Extraer audio{self.COLORS['G']}
+    [{self.COLORS['RE']} 5{self.COLORS['G']} ] {self.COLORS['Y']}Perfiles preconfigurados{self.COLORS['G']}
+    [{self.COLORS['RE']} 6{self.COLORS['G']} ] {self.COLORS['Y']}Gestionar Almacenamiento{self.COLORS['G']}
+    [{self.COLORS['RE']} 7{self.COLORS['G']} ] {self.COLORS['Y']}Modo avanzado{self.COLORS['G']}
+    [{self.COLORS['RE']} 8{self.COLORS['G']} ] {self.COLORS['Y']}Descargar de internet{self.COLORS['G']}
+    [{self.COLORS['RE']} 9{self.COLORS['G']} ] {self.COLORS['Y']}Configurar APIs de IA{self.COLORS['G']}
+    [{self.COLORS['RE']} 10{self.COLORS['G']} ] {self.COLORS['Y']}Centro de notificaciones{self.COLORS['G']}
+    [{self.COLORS['RE']} 11{self.COLORS['G']} ] {self.COLORS['Y']}Verificar dependencias{self.COLORS['G']}
+    [{self.COLORS['RE']} 12{self.COLORS['G']} ] {self.COLORS['Y']}Acerca de..{self.COLORS['G']}
+    [{self.COLORS['RE']} 00{self.COLORS['G']} ] {self.COLORS['Y']}Actualizar..{self.COLORS['G']}
+    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Salir{self.COLORS['G']}
+    {self.COLORS['RE']}""")
+
+            option = input("-Milux- Convert >> ").strip()
+            
+            if option == "1":
+                self.MODE = "- Audio -"
+                self.FR1 = "mp3"
+                self.FR2 = "wma"
+                self.FR3 = "ogg"
+                self.main_conversion()
+            elif option == "2":
+                self.MODE = "- Imagen -"
+                self.FR1 = "jpeg"
+                self.FR2 = "png"
+                self.FR3 = "jpg"
+                self.main_conversion()
+            elif option == "3":
+                self.MODE = "- Video -"
+                self.FR1 = "avi"
+                self.FR2 = "wmv"
+                self.FR3 = "mp4"
+                self.main_conversion()
+            elif option == "4":
+                self.MODE = "- Extraer Audio -"
+                self.FR1 = "mp3"
+                self.FR2 = "wav"
+                self.FR3 = "ogg"
+                self.main_conversion()
+            elif option == "5":
+                self.profiles_menu()
+            elif option == "6":
+                self.storage_manager()
+            elif option == "7":
+                self.advanced_mode()
+            elif option == "8":
+                self.internet_download()
+            elif option == "9":
+                self.api_setup()
+            elif option == "10":
+                self.notification_center()
+            elif option == "11":
+                self.check_dependencies()
+                input("Presiona ENTER para continuar...")
+            elif option == "12":
+                self.about()
+            elif option == "00":
+                self.update()
+            elif option == "0":
+                self.exit_app()
+            else:
+                print(f"{self.COLORS['R']}Opción inválida{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def about(self):
+        """Muestra la pantalla 'Acerca de...' con información del script."""
+        self.logo()
+        print(f"{self.COLORS['G']}--- Acerca de Converter ---{self.COLORS['RE']}\n")
+        print(f"{self.COLORS['C']}Versión: 1.0.0{self.COLORS['RE']}")
+        print(f"{self.COLORS['C']}Autor: MiLu/DNP{self.COLORS['RE']}\n")
+        
+        print(f"{self.COLORS['Y']}Este script es una herramienta multifuncional para la conversión")
+        print(f"y gestión de archivos multimedia, diseñada para Termux.{self.COLORS['RE']}\n")
+        
+        print(f"{self.COLORS['G']}Funcionalidades Principales:{self.COLORS['RE']}")
+        print("  - Conversión de Video, Audio e Imágenes a múltiples formatos.")
+        print("  - Extracción de audio de archivos de video.")
+        print("  - Perfiles preconfigurados para conversiones rápidas.")
+        print("  - Gestor de almacenamiento para analizar y limpiar archivos.")
+        print("  - Herramientas de diagnóstico para análisis técnico de medios.")
+        print("  - Descarga de contenido multimedia desde URLs.\n")
+        
+        print(f"{self.COLORS['P']}¡Gracias por usar Converter!{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def update(self):
+        """Verifica y aplica actualizaciones del script desde GitHub."""
+        self.logo()
+        print(f"{self.COLORS['G']}Buscando actualizaciones...{self.COLORS['RE']}")
+        time.sleep(1)
+
+        # Asegurar que el directorio .milux existe
+        os.makedirs(os.path.dirname(self.CAV_FILE), exist_ok=True)
+
+        # Crear archivo de versión local si no existe
+        if not os.path.exists(self.CAV_FILE):
+            with open(self.CAV_FILE, 'w') as f:
+                f.write("0.0") # Versión inicial
+
+        try:
+            # Descargar información de versión remota
+            subprocess.run(["curl", "-s", "-o", self.CCV_FILE, "https://raw.githubusercontent.com/miluxmil/milux/master/CCV"], check=True)
+            
+            with open(self.CCV_FILE, 'r') as f: 
+                remote_version = f.read().strip()
+            with open(self.CAV_FILE, 'r') as f: 
+                local_version = f.read().strip()
+
+            if remote_version == local_version:
+                self.logo()
+                print(f"{self.COLORS['G']}Tienes la última versión (v{local_version}){self.COLORS['RE']}")
+                time.sleep(2)
+                return
+
+            self.logo()
+            print(f"{self.COLORS['G']}¡Nueva versión disponible!{self.COLORS['RE']}")
+            print(f"{self.COLORS['Y']}Tu versión: v{local_version}{self.COLORS['RE']}")
+            print(f"{self.COLORS['Y']}Versión remota: v{remote_version}{self.COLORS['RE']}")
+            print(f"{self.COLORS['C']}Descargando actualización...{self.COLORS['RE']}")
+
+            # Descargar CHANGELOG y nueva versión del script
+            subprocess.run(["curl", "-s", "-o", self.CHANGELOG_FILE, "https://raw.githubusercontent.com/miluxmil/milux/master/CHANGELOG"], check=True)
+            subprocess.run(["curl", "-s", "-o", "/data/data/com.termux/files/home/convert.tmp", "https://raw.githubusercontent.com/miluxmil/milux/master/converter"], check=True) 
+
+            if not os.path.exists("/data/data/com.termux/files/home/convert.tmp") or os.path.getsize("/data/data/com.termux/files/home/convert.tmp") == 0:
+                print(f"{self.COLORS['R']}Error: No se pudo descargar la actualización.{self.COLORS['RE']}")
+                time.sleep(2)
+                return
+
+            # Reemplazar el script actual
+            shutil.move("/data/data/com.termux/files/home/convert.tmp", "/data/data/com.termux/files/home/converter")
+            
+            # Actualizar la versión local
+            with open(self.CAV_FILE, 'w') as f:
+                f.write(remote_version)
+
+            # Mostrar changelog
+            self._show_changelog(remote_version)
+            
+            # Reiniciar
+            self.logo()
+            print(f"{self.COLORS['G']}¡Actualización completada!{self.COLORS['RE']}")
+            print(f"{self.COLORS['Y']}Reiniciando CONVERTER v{remote_version}{self.COLORS['RE']}")
+            time.sleep(3)
+            # Reiniciar el script 
+            os.execv(sys.executable, [sys.executable] + sys.argv)
+
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}Error durante la actualización: {e.stderr}{self.COLORS['RE']}")
+            time.sleep(2)
+        except Exception as e: 
+            print(f"{self.COLORS['R']}Error inesperado durante la actualización: {e}{self.COLORS['RE']}")
+            time.sleep(2)
+
+    def exit_app(self):
+        self.logo()
+        print(f"{self.COLORS['G']}¡Hasta luego!{self.COLORS['RE']}")
+        sys.exit()
+        if option == "00":
+            self.update()
+        elif option == "0":
+            self.exit_app()
+        else:
+            print(f"{self.COLORS['R']}Opción inválida{self.COLORS['RE']}")
+            time.sleep(1)
+
+    def profiles_menu(self):
+        """Muestra y gestiona los perfiles preconfigurados."""
+        while True:
+            self.logo()
+            print(f"{self.COLORS['G']}Perfiles Preconfigurados{self.COLORS['RE']}\n")
+            for key, profile in self.PROFILES.items():
+                print(f"    [{self.COLORS['RE']} {key}{self.COLORS['G']} ] {self.COLORS['Y']}{profile['name']}{self.COLORS['RE']} (Salida: .{profile['exit']})")
+            
+            print(f"\n    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Volver al menú principal{self.COLORS['RE']}")
+            
+            option = input("\nSelecciona un perfil >> ").strip()
+
+            if option == '0':
+                return
+            
+            if option in self.PROFILES:
+                selected = self.PROFILES[option]
+                self.MODE = selected['mode']
+                self.EXIT = selected['exit']
+                self.PROFILE_SELECTED = True
+                print(f"\n{self.COLORS['G']}Perfil '{selected['name']}' seleccionado. Formato de salida: .{self.EXIT}{self.COLORS['RE']}")
+                time.sleep(2)
+                self.main_conversion()
+                return
+            else:
+                print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def storage_manager(self):
+        """Menú para gestionar el almacenamiento con barra de uso."""
+        while True:
+            self.logo()
+            print(f"{self.COLORS['G']}Gestor de Almacenamiento{self.COLORS['RE']}\n")
+            
+            try:
+                # Obtener el uso del disco para el almacenamiento principal de Termux
+                total, used, free = shutil.disk_usage(os.path.expanduser('~'))
+                
+                used_gb = used / (1024**3)
+                total_gb = total / (1024**3)
+                free_gb = free / (1024**3)
+                
+                used_percent = (used / total) * 100
+                
+                # Crear la barra de progreso
+                bar_length = 30
+                filled_length = int(bar_length * used / total)
+                bar = '█' * filled_length + '-' * (bar_length - filled_length)
+
+                print(f"Almacenamiento: {free_gb:.1f}G libres de {total_gb:.1f}G ({used_percent:.0f}% usado)")
+                print(f" [{self.COLORS['G']}{bar}{self.COLORS['RE']}]\n")
+
+            except (FileNotFoundError, ZeroDivisionError) as e:
+                print(f"{self.COLORS['Y']}No se pudo obtener la información de almacenamiento: {e}{self.COLORS['RE']}\n")
+
+            print(f"    [{self.COLORS['RE']} 1{self.COLORS['G']} ] {self.COLORS['Y']}Analizar espacio por carpetas{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 2{self.COLORS['G']} ] {self.COLORS['Y']}Buscar archivos grandes (>50MB){self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 3{self.COLORS['G']} ] {self.COLORS['Y']}Limpiar archivos temporales{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 4{self.COLORS['G']} ] {self.COLORS['Y']}Organizar carpeta actual{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 5{self.COLORS['G']} ] {self.COLORS['Y']}Buscar archivos duplicados{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 6{self.COLORS['G']} ] {self.COLORS['Y']}Comprimir archivos{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 7{self.COLORS['G']} ] {self.COLORS['Y']}Liberar espacio de caché{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 8{self.COLORS['G']} ] {self.COLORS['Y']}Buscar y eliminar carpetas vacías{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 9{self.COLORS['G']} ] {self.COLORS['Y']}Limpiar archivos basura (CorpseFinder){self.COLORS['RE']}")
+            print(f"\n    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Volver al menú principal{self.COLORS['RE']}")
+
+            option = input("\nSelecciona una opción >> ").strip()
+
+            if option == '1':
+                self.analyze_folder_space()
+            elif option == '2':
+                self.find_large_files()
+            elif option == '3':
+                self.clean_temp_files()
+            elif option == '4':
+                self.organize_current_folder()
+            elif option == '5':
+                self.find_duplicate_files()
+            elif option == '6':
+                self.compress_files()
+            elif option == '7':
+                self.clear_cache()
+            elif option == '8':
+                self.find_and_delete_empty_folders()
+            elif option == '9':
+                self.find_and_clean_junk_files()
+            elif option == '0':
+                return
+            else:
+                print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def find_and_clean_junk_files(self):
+        """Identifica y elimina archivos basura, restos de apps y temporales."""
+        self.logo()
+        print(f"{self.COLORS['G']}Limpiar Archivos Basura (CorpseFinder){self.COLORS['RE']}\n")
+        
+        default_path = os.path.expanduser("~")
+        search_path_input = input(f"Introduce la ruta a limpiar (deja en blanco para: {default_path}) >> ").strip()
+        
+        if not search_path_input:
+            search_path = default_path
+        else:
+            search_path = os.path.expanduser(search_path_input)
+
+        if not os.path.isdir(search_path):
+            print(f"{self.COLORS['R']}Ruta no válida o no es un directorio: {search_path}{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"{self.COLORS['Y']}Buscando archivos innecesarios en {search_path}... (esto puede tardar){self.COLORS['RE']}")
+
+        junk_files = []
+        total_size = 0
+
+        # 1. Definir patrones de basura y rutas de búsqueda
+        temp_patterns = ['*.tmp', '*.bak', '*.swp', '*.log', '*~']
+        
+        print(f"Buscando patrones de basura en: {search_path}")
+        for pattern in temp_patterns:
+            try:
+                for f in glob.glob(os.path.join(search_path, '**', pattern), recursive=True):
+                    if os.path.isfile(f) and f not in [item[0] for item in junk_files]:
+                        try:
+                            size = os.path.getsize(f)
+                            junk_files.append((f, size))
+                            total_size += size
+                        except OSError:
+                            continue
+            except Exception as e:
+                print(f"{self.COLORS['R']}Error buscando patrón {pattern}: {e}{self.COLORS['RE']}")
+
+
+        # 2. Simular pkg autoremove para encontrar paquetes huérfanos (CorpseFinder)
+        orphaned_packages = []
+        orphaned_size_str = "0B"
+        print("Buscando paquetes huérfanos con 'pkg'...")
+        try:
+            cmd = ["pkg", "autoremove", "--simulate"]
+            result = subprocess.run(cmd, capture_output=True, text=True, timeout=15)
+            
+            if "The following packages will be REMOVED" in result.stdout:
+                packages_section = result.stdout.split("The following packages will be REMOVED:")[1]
+                packages_str = packages_section.split("\n")[1 if len(packages_section.split("\n")) > 1 else 0]
+                orphaned_packages = packages_str.strip().split()
+            
+            size_match = re.search(r"(\d+(\.\d+)?\s?[kMGT]?B) of archives will be freed", result.stdout)
+            if size_match:
+                orphaned_size_str = size_match.group(1)
+
+        except FileNotFoundError:
+            print(f"{self.COLORS['Y']}Info: Comando 'pkg' no encontrado. Omitiendo búsqueda de paquetes huérfanos.{self.COLORS['RE']}")
+        except subprocess.TimeoutExpired:
+            print(f"{self.COLORS['R']}Error: La búsqueda de paquetes huérfanos tardó demasiado.{self.COLORS['RE']}")
+        except Exception as e:
+             print(f"{self.COLORS['R']}Error al buscar paquetes huérfanos: {e}{self.COLORS['RE']}")
+
+        self.logo()
+        print(f"{self.COLORS['G']}Resultados del Análisis de Basura{self.COLORS['RE']}\n")
+
+        if not junk_files and not orphaned_packages:
+            print(f"{self.COLORS['G']}✓ No se encontraron archivos basura o paquetes huérfanos.{self.COLORS['RE']}")
+            input("\nPresiona ENTER para continuar...")
+            return
+
+        if orphaned_packages:
+            print(f"{self.COLORS['Y']}Paquetes huérfanos a eliminar ({len(orphaned_packages)}):{self.COLORS['RE']}")
+            print(f"  {self.COLORS['C']}{' '.join(orphaned_packages)}{self.COLORS['RE']}")
+            print(f"  Espacio a liberar: ~{orphaned_size_str}")
+
+        if junk_files:
+            size_mb = total_size / (1024 * 1024)
+            print(f"\n{self.COLORS['Y']}Archivos basura encontrados en {search_path} ({len(junk_files)}):{self.COLORS['RE']}")
+            print(f"  Tamaño total a liberar: {size_mb:.2f} MB")
+
+        confirm = input(f"\n{self.COLORS['R']}¿Deseas eliminar permanentemente estos archivos y paquetes? (s/n) >> {self.COLORS['RE']}").strip().lower()
+
+        if confirm == 's':
+            deleted_files_count = 0
+            freed_size = 0
+            
+            if junk_files:
+                print(f"\n{self.COLORS['Y']}Eliminando archivos basura...{self.COLORS['RE']}")
+                for f, size in junk_files:
+                    try:
+                        os.remove(f)
+                        deleted_files_count += 1
+                        freed_size += size
+                    except OSError as e:
+                        print(f"{self.COLORS['R']}✗ No se pudo eliminar {f}: {e}{self.COLORS['RE']}")
+            
+            if orphaned_packages:
+                print(f"\n{self.COLORS['Y']}Ejecutando 'pkg autoremove'...{self.COLORS['RE']}")
+                try:
+                    subprocess.run(["pkg", "autoremove", "-y"], check=True, capture_output=True)
+                    print(f"{self.COLORS['G']}✓ Paquetes huérfanos eliminados.{self.COLORS['RE']}")
+                except (subprocess.CalledProcessError, FileNotFoundError) as e:
+                    print(f"{self.COLORS['R']}✗ Error al eliminar paquetes: {getattr(e, 'stderr', e)}{self.COLORS['RE']}")
+
+            freed_mb = freed_size / (1024 * 1024)
+            print(f"\n{self.COLORS['G']}Limpieza completada.{self.COLORS['RE']}")
+            if deleted_files_count > 0:
+                print(f"Se eliminaron {deleted_files_count} archivos ({freed_mb:.2f} MB).")
+            if orphaned_packages:
+                print("También se eliminaron los paquetes huérfanos.")
+        else:
+            print(f"{self.COLORS['Y']}Operación cancelada.{self.COLORS['RE']}")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def advanced_mode(self):
+        """Menú para funciones avanzadas y experimentales."""
+        while True:
+            self.logo()
+            print(f"{self.COLORS['G']}Modo Avanzado{self.COLORS['RE']}\n")
+            print(f"    [{self.COLORS['RE']} 1{self.COLORS['G']} ] {self.COLORS['Y']}Editor de parámetros FFmpeg{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 2{self.COLORS['G']} ] {self.COLORS['Y']}Editor de parámetros ImageMagick{self.COLORS['RE']}")
+            
+            print(f"    [{self.COLORS['RE']} 4{self.COLORS['G']} ] {self.COLORS['Y']}Monitor de recursos en tiempo real{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 5{self.COLORS['G']} ] {self.COLORS['Y']}Gestión de proyectos multimedia{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 6{self.COLORS['G']} ] {self.COLORS['Y']}Herramientas de diagnóstico{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 7{self.COLORS['G']} ] {self.COLORS['Y']}Modo consola profesional{self.COLORS['RE']}")
+            print(f"\n    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Volver al menú principal{self.COLORS['RE']}")
+
+            option = input("\nSelecciona una opción >> ").strip()
+
+            if option == '1':
+                self.ffmpeg_parameter_editor()
+            elif option == '2':
+                self.imagemagick_parameter_editor()
+            
+            elif option == '4':
+                self.realtime_resource_monitor()
+            elif option == '5':
+                self.multimedia_project_management()
+            elif option == '6':
+                self.diagnostic_tools()
+            elif option == '7':
+                self.professional_console_mode()
+            elif option == '0':
+                return
+            else:
+                print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def find_and_delete_empty_folders(self):
+        """Busca y elimina carpetas vacías en una ruta especificada."""
+        path = input(f"Introduce la ruta a limpiar de carpetas vacías (ej: {os.path.join(os.path.expanduser('~'), 'Downloads')}) >> ").strip()
+        if not os.path.isdir(path):
+            print(f"{self.COLORS['R']}Ruta no válida.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        empty_folders = []
+        print(f"\n{self.COLORS['Y']}Buscando carpetas vacías en {path}...{self.COLORS['RE']}")
+        for dirpath, dirnames, filenames in os.walk(path, topdown=False):
+            if not dirnames and not filenames:
+                empty_folders.append(dirpath)
+
+        self.logo()
+        print(f"{self.COLORS['G']}Carpetas Vacías Encontradas{self.COLORS['RE']}\n")
+        if not empty_folders:
+            print("No se encontraron carpetas vacías.")
+        else:
+            for folder in empty_folders:
+                print(f"    - {self.COLORS['C']}{folder}{self.COLORS['RE']}")
+            
+            delete_confirm = input("\n¿Deseas eliminar todas estas carpetas? (s/n) >> ").strip().lower()
+            if delete_confirm == 's':
+                deleted_count = 0
+                for folder in empty_folders:
+                    try:
+                        os.rmdir(folder)
+                        print(f"{self.COLORS['G']}✓ Eliminada: {folder}{self.COLORS['RE']}")
+                        deleted_count += 1
+                    except OSError as e:
+                        print(f"{self.COLORS['R']}✗ Error al eliminar {folder}: {e}{self.COLORS['RE']}")
+                print(f"\n{deleted_count} carpeta(s) eliminada(s).")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def analyze_folder_space(self):
+        """Analiza y muestra el espacio usado por las subcarpetas de una ruta."""
+        path = input("Introduce la ruta a analizar (ej: /sdcard/Download) >> ").strip()
+        if not os.path.isdir(path):
+            print(f"{self.COLORS['R']}Ruta no válida o no es un directorio.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Analizando {path}... (esto puede tardar){self.COLORS['RE']}")
+        folders = {}
+        for entry in os.scandir(path):
+            if entry.is_dir(follow_symlinks=False):
+                total_size = 0
+                try:
+                    for dirpath, dirnames, filenames in os.walk(entry.path):
+                        for f in filenames:
+                            fp = os.path.join(dirpath, f)
+                            if not os.path.islink(fp):
+                                total_size += os.path.getsize(fp)
+                    folders[entry.name] = total_size
+                except OSError:
+                    continue
+        
+        self.logo()
+        print(f"{self.COLORS['G']}Análisis de Espacio en: {path}{self.COLORS['RE']}\n")
+        # Ordenar carpetas por tamaño (de mayor a menor)
+        sorted_folders = sorted(folders.items(), key=lambda x: x[1], reverse=True)
+        
+        for name, size in sorted_folders:
+            size_mb = size / (1024 * 1024)
+            print(f"    - {self.COLORS['C']}{name}{self.COLORS['RE']}: {size_mb:.2f} MB")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def find_large_files(self):
+        """Busca archivos más grandes que un umbral definido por el usuario y permite eliminarlos."""
+        path = input("Introduce la ruta a buscar (ej: /sdcard) >> ").strip()
+        if not os.path.isdir(path):
+            print(f"{self.COLORS['R']}Ruta no válida.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        try:
+            size_threshold_mb_str = input("Buscar archivos más grandes de (MB) [Default: 50] >> ").strip()
+            size_threshold_mb = int(size_threshold_mb_str) if size_threshold_mb_str else 50
+        except ValueError:
+            print(f"{self.COLORS['R']}Entrada inválida. Usando el valor por defecto de 50MB.{self.COLORS['RE']}")
+            size_threshold_mb = 50
+            time.sleep(2)
+
+        size_threshold_bytes = size_threshold_mb * 1024 * 1024
+        large_files = []
+
+        print(f"\n{self.COLORS['Y']}Buscando archivos >{size_threshold_mb}MB en {path}...{self.COLORS['RE']}")
+        try:
+            for dirpath, _, filenames in os.walk(path):
+                for f in filenames:
+                    fp = os.path.join(dirpath, f)
+                    try:
+                        if not os.path.islink(fp) and os.path.getsize(fp) > size_threshold_bytes:
+                            large_files.append((fp, os.path.getsize(fp)))
+                    except OSError:
+                        continue
+        except OSError as e:
+            print(f"{self.COLORS['R']}Error durante la búsqueda: {e}{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        self.logo()
+        print(f"{self.COLORS['G']}Archivos Grandes Encontrados (>{size_threshold_mb}MB){self.COLORS['RE']}\n")
+        
+        if not large_files:
+            print("No se encontraron archivos grandes.")
+        else:
+            large_files.sort(key=lambda x: x[1], reverse=True)
+            for i, (file_path, size) in enumerate(large_files):
+                size_mb = size / (1024 * 1024)
+                print(f"    [{self.COLORS['RE']}{i+1}{self.COLORS['G']}] {self.COLORS['C']}{file_path}{self.COLORS['RE']} ({size_mb:.2f} MB)")
+
+            delete_confirm = input("\n¿Deseas eliminar alguno de estos archivos? (s/n) >> ").strip().lower()
+            if delete_confirm == 's':
+                indices_to_delete = input("Selecciona los archivos a eliminar (números separados por espacio) >> ").split()
+                files_to_delete = []
+                for index_str in indices_to_delete:
+                    try:
+                        index = int(index_str) - 1
+                        if 0 <= index < len(large_files):
+                            files_to_delete.append(large_files[index])
+                    except (ValueError, IndexError):
+                        continue
+                
+                if files_to_delete:
+                    print(f"\n{self.COLORS['Y']}Los siguientes archivos serán eliminados permanentemente:{self.COLORS['RE']}")
+                    for file_path, _ in files_to_delete:
+                        print(f" - {file_path}")
+                    
+                    final_confirm = input("\n¿Estás seguro? (s/n) >> ").strip().lower()
+                    if final_confirm == 's':
+                        deleted_count = 0
+                        for file_path, _ in files_to_delete:
+                            try:
+                                print(f"{self.COLORS['Y']}DEBUG: Ejecutando comando: rm '{file_path}'{self.COLORS['RE']}")
+                                result = subprocess.run(["rm", file_path], check=True, capture_output=True, text=True)
+                                print(f"{self.COLORS['Y']}DEBUG: Stdout: {result.stdout.strip()}{self.COLORS['RE']}")
+                                print(f"{self.COLORS['Y']}DEBUG: Stderr: {result.stderr.strip()}{self.COLORS['RE']}")
+                                print(f"{self.COLORS['G']}✓ Eliminado: {file_path}{self.COLORS['RE']}")
+                                deleted_count += 1
+                            except subprocess.CalledProcessError as e:
+                                print(f"{self.COLORS['R']}✗ Error al eliminar {file_path}: {e.stderr.strip()}{self.COLORS['RE']}")
+                            except FileNotFoundError:
+                                print(f"{self.COLORS['R']}✗ Error: El comando 'rm' no se encontró.{self.COLORS['RE']}")
+                        print(f"\n{deleted_count} archivo(s) eliminado(s).")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def clean_temp_files(self):
+        """Limpia archivos temporales comunes."""
+        temp_dirs = [os.path.expanduser("~/.cache"), "/data/data/com.termux/files/usr/tmp"]
+        files_deleted = 0
+        total_size = 0
+
+        print(f"{self.COLORS['Y']}Buscando archivos temporales...{self.COLORS['RE']}")
+        for temp_dir in temp_dirs:
+            if os.path.isdir(temp_dir):
+                for dirpath, _, filenames in os.walk(temp_dir):
+                    for f in filenames:
+                        fp = os.path.join(dirpath, f)
+                        try:
+                            if not os.path.islink(fp):
+                                file_size = os.path.getsize(fp)
+                                os.remove(fp)
+                                files_deleted += 1
+                                total_size += file_size
+                        except OSError:
+                            continue
+        
+        self.logo()
+        print(f"{self.COLORS['G']}Limpieza Completada{self.COLORS['RE']}\n")
+        print(f"Se eliminaron {self.COLORS['C']}{files_deleted}{self.COLORS['RE']} archivos temporales.")
+        print(f"Espacio liberado: {self.COLORS['C']}{size_mb:.2f} MB{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def organize_current_folder(self):
+        """Organiza archivos en una carpeta por tipo (imágenes, videos, etc.)."""
+        path = input("Introduce la ruta a organizar (ej: /sdcard/Download) >> ").strip()
+        if not os.path.isdir(path):
+            print(f"{self.COLORS['R']}Ruta no válida.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        file_types = {
+            "Imagenes": ["jpg", "jpeg", "png", "gif", "webp"],
+            "Videos": ["mp4", "mkv", "avi", "mov", "wmv"],
+            "Audio": ["mp3", "wav", "ogg", "m4a", "flac"],
+            "Documentos": ["pdf", "doc", "docx", "xls", "xlsx", "ppt", "pptx", "txt"],
+            "Comprimidos": ["zip", "rar", "7z", "tar", "gz"],
+        }
+
+        confirm = input(f"¿Estás seguro de que quieres organizar la carpeta {path}? (s/n) >> ").strip().lower()
+        if confirm != 's':
+            return
+
+        print(f"{self.COLORS['Y']}Organizando...{self.COLORS['RE']}")
+        for filename in os.listdir(path):
+            src_path = os.path.join(path, filename)
+            if os.path.isfile(src_path):
+                ext = filename.split('.')[-1].lower()
+                moved = False
+                for folder_name, extensions in file_types.items():
+                    if ext in extensions:
+                        dest_folder = os.path.join(path, folder_name)
+                        os.makedirs(dest_folder, exist_ok=True)
+                        shutil.move(src_path, os.path.join(dest_folder, filename))
+                        moved = True
+                        break
+                if not moved:
+                    # Mover otros archivos a una carpeta 'Otros'
+                    dest_folder = os.path.join(path, "Otros")
+                    os.makedirs(dest_folder, exist_ok=True)
+                    shutil.move(src_path, os.path.join(dest_folder, filename))
+        
+        self.logo()
+        print(f"{self.COLORS['G']}¡Carpeta organizada!{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def find_duplicate_files(self):
+        """Busca archivos duplicados en una ruta basándose en su contenido."""
+        path = input("Introduce la ruta a buscar duplicados (ej: /sdcard) >> ").strip()
+        if not os.path.isdir(path):
+            print(f"{self.COLORS['R']}Ruta no válida.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        hashes = {}
+        duplicates = []
+        print(f"{self.COLORS['Y']}Buscando duplicados en {path}... (esto puede ser muy lento){self.COLORS['RE']}")
+
+        for dirpath, _, filenames in os.walk(path):
+            for filename in filenames:
+                file_path = os.path.join(dirpath, filename)
+                if os.path.isfile(file_path) and not os.path.islink(file_path):
+                    try:
+                        with open(file_path, 'rb') as f:
+                            file_hash = hashlib.md5(f.read()).hexdigest()
+                        if file_hash in hashes:
+                            duplicates.append((file_path, hashes[file_hash]))
+                        else:
+                            hashes[file_hash] = file_path
+                    except OSError:
+                        continue
+
+        self.logo()
+        print(f"{self.COLORS['G']}Archivos Duplicados Encontrados{self.COLORS['RE']}\n")
+        if not duplicates:
+            print("No se encontraron archivos duplicados.")
+        else:
+            for file1, file2 in duplicates:
+                print(f"    - {self.COLORS['C']}{file1}{self.COLORS['RE']} es un duplicado de {self.COLORS['C']}{file2}{self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def compress_files(self):
+        """Comprime archivos seleccionados en un archivo ZIP."""
+        path = input("Introduce la ruta de los archivos a comprimir >> ").strip()
+        if not os.path.isdir(path):
+            print(f"{self.COLORS['R']}Ruta no válida.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        files_to_compress = []
+        all_files = [f for f in os.listdir(path) if os.path.isfile(os.path.join(path, f))]
+        
+        if not all_files:
+            print("No hay archivos en esta carpeta.")
+            time.sleep(2)
+            return
+
+        print("Selecciona los archivos a comprimir (números separados por espacio):")
+        for i, filename in enumerate(all_files):
+            print(f"    [{i+1}] {filename}")
+        
+        selected_indices = input(">> ").split()
+        for index in selected_indices:
+            try:
+                files_to_compress.append(all_files[int(index) - 1])
+            except (ValueError, IndexError):
+                continue
+
+        if not files_to_compress:
+            print("No se seleccionaron archivos.")
+            return
+
+        zip_name = input("Nombre del archivo ZIP de salida (sin .zip) >> ").strip() + ".zip"
+        zip_path = os.path.join(path, zip_name)
+
+        print(f"{self.COLORS['Y']}Comprimiendo...{self.COLORS['RE']}")
+        with zipfile.ZipFile(zip_path, 'w') as zipf:
+            for file in files_to_compress:
+                zipf.write(os.path.join(path, file), arcname=file)
+        
+        self.logo()
+        print(f"{self.COLORS['G']}¡Archivos comprimidos en {zip_name}!{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def clear_cache(self):
+        """Opción para limpiar cachés de aplicaciones comunes (si es posible)."""
+        print(f"{self.COLORS['Y']}Esta función intentará limpiar la caché de pip y npm.{self.COLORS['RE']}")
+        confirm = input("¿Estás seguro? (s/n) >> ").strip().lower()
+        if confirm != 's':
+            return
+
+        # Limpiar caché de pip
+        print("Limpiando caché de pip...")
+        subprocess.run(["pip", "cache", "purge"], capture_output=True)
+
+        # Limpiar caché de npm
+        print("Limpiando caché de npm...")
+        subprocess.run(["npm", "cache", "clean", "--force"], capture_output=True)
+        
+        self.logo()
+        print(f"{self.COLORS['G']}Cachés limpiadas.{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+    
+    def ffmpeg_parameter_editor(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Editor de parámetros FFmpeg{self.COLORS['RE']}\n")
+        print(f"{self.COLORS['Y']}Ingresa tu comando FFmpeg personalizado. Ejemplo: ffmpeg -i input.mp4 -vf scale=1280:-1 output.mp4{self.COLORS['RE']}")
+        print(f"{self.COLORS['Y']}Asegúrate de que las rutas de los archivos estén entre comillas si contienen espacios.{self.COLORS['RE']}")
+        
+        command = input("FFmpeg >> ").strip()
+        
+        if not command.startswith("ffmpeg"):
+            print(f"{self.COLORS['R']}El comando debe empezar con 'ffmpeg'.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Ejecutando: {command}{self.COLORS['RE']}")
+        try:
+            self.start_custom_spinner("Ejecutando FFmpeg...")
+            result = subprocess.run(command.split(), check=True, capture_output=True, text=True)
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['G']}Comando FFmpeg ejecutado con éxito!{self.COLORS['RE']}")
+            if result.stdout:
+                print(f"{self.COLORS['C']}Stdout:\n{result.stdout}{self.COLORS['RE']}")
+            if result.stderr:
+                print(f"{self.COLORS['Y']}Stderr (información/advertencias):\n{result.stderr}{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al ejecutar FFmpeg (código {e.returncode}):{self.COLORS['RE']}")
+            print(f"{self.COLORS['R']}Stderr:\n{e.stderr}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: FFmpeg no encontrado. Asegúrate de que esté instalado y en tu PATH.{self.COLORS['RE']}")
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def imagemagick_parameter_editor(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Editor de parámetros ImageMagick{self.COLORS['RE']}\n")
+        print(f"{self.COLORS['Y']}Ingresa tu comando ImageMagick (convert o mogrify) personalizado. Ejemplo: convert input.png -resize 50% output.jpg{self.COLORS['RE']}")
+        print(f"{self.COLORS['Y']}Asegúrate de que las rutas de los archivos estén entre comillas si contienen espacios.{self.COLORS['RE']}")
+        
+        command = input("ImageMagick >> ").strip()
+        
+        if not (command.startswith("convert") or command.startswith("mogrify")):
+            print(f"{self.COLORS['R']}El comando debe empezar con 'convert' o 'mogrify'.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Ejecutando: {command}{self.COLORS['RE']}")
+        try:
+            self.start_custom_spinner("Ejecutando ImageMagick...")
+            result = subprocess.run(command.split(), check=True, capture_output=True, text=True)
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['G']}Comando ImageMagick ejecutado con éxito!{self.COLORS['RE']}")
+            if result.stdout:
+                print(f"{self.COLORS['C']}Stdout:\n{result.stdout}{self.COLORS['RE']}")
+            if result.stderr:
+                print(f"{self.COLORS['Y']}Stderr (información/advertencias):\n{result.stderr}{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al ejecutar ImageMagick (código {e.returncode}):{self.COLORS['RE']}")
+            print(f"{self.COLORS['R']}Stderr:\n{e.stderr}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: ImageMagick no encontrado. Asegúrate de que esté instalado y en tu PATH.{self.COLORS['RE']}")
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    
+
+    def realtime_resource_monitor(self):
+        """Muestra información de recursos del sistema en tiempo real."""
+        self.logo()
+        print(f"{self.COLORS['G']}Monitor de Recursos en Tiempo Real{self.COLORS['RE']}\n")
+
+        print(f"{self.COLORS['Y']}Obteniendo información de CPU y Memoria...{self.COLORS['RE']}")
+        try:
+            # CPU y Memoria (usando top -n 1 para una instantánea)
+            top_output = subprocess.run(["top", "-n", "1"], capture_output=True, text=True, check=True).stdout
+            cpu_line = "No disponible"
+            mem_line = "No disponible"
+            for line in top_output.splitlines():
+                if "Cpu(s)" in line or "CPU:" in line:
+                    cpu_line = line.strip()
+                if "Mem:" in line or "KiB Mem :" in line:
+                    mem_line = line.strip()
+            print(f"{self.COLORS['C']}CPU: {cpu_line}{self.COLORS['RE']}")
+            print(f"{self.COLORS['C']}Memoria: {mem_line}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            print(f"{self.COLORS['R']}Comando 'top' no encontrado. Instala 'procps' (pkg install procps).{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}Error al obtener datos de CPU/Memoria: {e.stderr.strip()}{self.COLORS['RE']}")
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error inesperado al obtener datos de CPU/Memoria: {e}{self.COLORS['RE']}")
+
+        print(f"\n{self.COLORS['Y']}Obteniendo información de Espacio en Disco...{self.COLORS['RE']}")
+        try:
+            # Espacio en Disco
+            df_output = subprocess.run(["df", "-h"], capture_output=True, text=True, check=True).stdout
+            print(f"{self.COLORS['C']}{df_output}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            print(f"{self.COLORS['R']}Comando 'df' no encontrado.{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}Error al obtener datos de espacio en disco: {e.stderr.strip()}{self.COLORS['RE']}")
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error inesperado al obtener datos de espacio en disco: {e}{self.COLORS['RE']}")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def multimedia_project_management(self):
+        """Gestión de proyectos multimedia (crear, cargar, listar, eliminar)."""
+        while True:
+            self.logo()
+            print(f"{self.COLORS['G']}Gestión de Proyectos Multimedia{self.COLORS['RE']}\n")
+            print(f"    [{self.COLORS['RE']} 1{self.COLORS['G']} ] {self.COLORS['Y']}Crear nuevo proyecto{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 2{self.COLORS['G']} ] {self.COLORS['Y']}Cargar proyecto existente{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 3{self.COLORS['G']} ] {self.COLORS['Y']}Listar todos los proyectos{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 4{self.COLORS['G']} ] {self.COLORS['Y']}Eliminar proyecto{self.COLORS['RE']}")
+            print(f"\n    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Volver al menú anterior{self.COLORS['RE']}")
+
+            option = input("\nSelecciona una opción >> ").strip()
+
+            if option == '1':
+                self._create_project()
+            elif option == '2':
+                self._load_project()
+            elif option == '3':
+                self._list_projects()
+            elif option == '4':
+                self._delete_project()
+            elif option == '0':
+                return
+            else:
+                print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def _create_project(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Crear Nuevo Proyecto{self.COLORS['RE']}\n")
+        project_name = input("Nombre del nuevo proyecto: ").strip()
+        if not project_name:
+            print(f"{self.COLORS['R']}El nombre del proyecto no puede estar vacío.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        project_path = os.path.join(self.PROJECTS_DIR, project_name)
+        if os.path.exists(project_path):
+            print(f"{self.COLORS['R']}El proyecto '{project_name}' ya existe.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        try:
+            os.makedirs(project_path)
+            with open(os.path.join(project_path, self.PROJECT_CONFIG), 'w') as f:
+                json.dump({'last_path': '', 'last_exit_format': ''}, f)
+            print(f"{self.COLORS['G']}Proyecto '{project_name}' creado en {project_path}{self.COLORS['RE']}")
+            self.CURRENT_PROJECT = project_name
+            print(f"{self.COLORS['G']}Proyecto actual establecido a '{project_name}'.{self.COLORS['RE']}")
+        except OSError as e:
+            print(f"{self.COLORS['R']}Error de sistema al crear el proyecto: {e}{self.COLORS['RE']}")
+        except Exception as e: 
+            print(f"{self.COLORS['R']}Error inesperado al crear el proyecto: {e}{self.COLORS['RE']}")
+        time.sleep(2)
+
+    def _load_project(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Cargar Proyecto Existente{self.COLORS['RE']}\n")
+        projects = [d for d in os.listdir(self.PROJECTS_DIR) if os.path.isdir(os.path.join(self.PROJECTS_DIR, d))]
+        
+        if not projects:
+            print(f"{self.COLORS['Y']}No hay proyectos disponibles.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        for i, project in enumerate(projects):
+            print(f"    [{self.COLORS['RE']}{i+1}{self.COLORS['G']} ] {self.COLORS['Y']}{project}{self.COLORS['RE']}")
+        
+        try:
+            choice = int(input("Selecciona el número del proyecto a cargar: ").strip())
+            if 1 <= choice <= len(projects):
+                selected_project = projects[choice - 1]
+                self.CURRENT_PROJECT = selected_project
+                self._load_project_config(selected_project)
+                print(f"{self.COLORS['G']}Proyecto '{selected_project}' cargado exitosamente.{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['R']}Selección inválida.{self.COLORS['RE']}")
+        except ValueError:
+            print(f"{self.COLORS['R']}Entrada inválida. Por favor, ingresa un número.{self.COLORS['RE']}")
+        except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
+            print(f"{self.COLORS['R']}Error al cargar la configuración del proyecto: {e}{self.COLORS['RE']}")
+        except Exception as e: 
+            print(f"{self.COLORS['R']}Error inesperado al cargar el proyecto: {e}{self.COLORS['RE']}")
+        time.sleep(2)
+
+    def _list_projects(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Listado de Proyectos{self.COLORS['RE']}\n")
+        projects = [d for d in os.listdir(self.PROJECTS_DIR) if os.path.isdir(os.path.join(self.PROJECTS_DIR, d))]
+        
+        if not projects:
+            print(f"{self.COLORS['Y']}No hay proyectos disponibles.{self.COLORS['RE']}")
+        else:
+            for project in projects:
+                current_indicator = " (ACTUAL)" if project == self.CURRENT_PROJECT else ""
+                print(f"    - {self.COLORS['C']}{project}{current_indicator}{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def _delete_project(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Eliminar Proyecto{self.COLORS['RE']}\n")
+        projects = [d for d in os.listdir(self.PROJECTS_DIR) if os.path.isdir(os.path.join(self.PROJECTS_DIR, d))]
+        
+        if not projects:
+            print(f"{self.COLORS['Y']}No hay proyectos para eliminar.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        for i, project in enumerate(projects):
+            print(f"    [{self.COLORS['RE']}{i+1}{self.COLORS['G']} ] {self.COLORS['Y']}{project}{self.COLORS['RE']}")
+        
+        try:
+            choice = int(input("Selecciona el número del proyecto a eliminar: ").strip())
+            if 1 <= choice <= len(projects):
+                project_to_delete = projects[choice - 1]
+                confirm = input(f"¿Estás seguro de eliminar el proyecto '{project_to_delete}' y todo su contenido? (s/n) >> ").strip().lower()
+                if confirm == 's':
+                    project_path = os.path.join(self.PROJECTS_DIR, project_to_delete)
+                    shutil.rmtree(project_path)
+                    if self.CURRENT_PROJECT == project_to_delete:
+                        self.CURRENT_PROJECT = ""
+                        print(f"{self.COLORS['Y']}El proyecto actual ha sido deseleccionado.{self.COLORS['RE']}")
+                    print(f"{self.COLORS['G']}Proyecto '{project_to_delete}' eliminado exitosamente.{self.COLORS['RE']}")
+                else:
+                    print(f"{self.COLORS['Y']}Operación cancelada.{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['R']}Selección inválida.{self.COLORS['RE']}")
+        except ValueError:
+            print(f"{self.COLORS['R']}Entrada inválida. Por favor, ingresa un número.{self.COLORS['RE']}")
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error al eliminar el proyecto: {e}{self.COLORS['RE']}")
+        time.sleep(2)
+
+    def _load_project_config(self, project_name):
+        config_path = os.path.join(self.PROJECTS_DIR, project_name, self.PROJECT_CONFIG)
+        if os.path.exists(config_path):
+            try:
+                with open(config_path, 'r') as f:
+                    config = json.load(f)
+            except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
+                print(f"{self.COLORS['R']}Error al cargar la configuración del proyecto: {e}{self.COLORS['RE']}")
+            except Exception as e: # Catch-all for any other unexpected errors
+                print(f"{self.COLORS['R']}Error inesperado al cargar la configuración del proyecto: {e}{self.COLORS['RE']}")
+        else:
+            print(f"{self.COLORS['Y']}No se encontró archivo de configuración para '{project_name}'.{self.COLORS['RE']}")
+
+    def _save_project_config(self):
+        if not self.CURRENT_PROJECT:
+            return
+        config_path = os.path.join(self.PROJECTS_DIR, self.CURRENT_PROJECT, self.PROJECT_CONFIG)
+        try:
+            config = {
+                'last_path': self.RUTA,
+                'last_exit_format': self.EXIT
+            }
+            with open(config_path, 'w') as f:
+                json.dump(config, f, indent=4)
+        except (IOError, OSError, json.JSONDecodeError) as e:
+            print(f"{self.COLORS['R']}Error de E/S o JSON al guardar la configuración del proyecto: {e}{self.COLORS['RE']}")
+        except Exception as e: 
+            print(f"{self.COLORS['R']}Error inesperado al guardar la configuración del proyecto: {e}{self.COLORS['RE']}")
+
+    def diagnostic_tools(self):
+        """Herramientas para diagnosticar el entorno y las dependencias."""
+        while True:
+            self.logo()
+            print(f"{self.COLORS['G']}Herramientas de Diagnóstico{self.COLORS['RE']}\n")
+            print(f"    [{self.COLORS['RE']} 1{self.COLORS['G']} ] {self.COLORS['Y']}Verificar integridad de archivos multimedia{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 2{self.COLORS['G']} ] {self.COLORS['Y']}Analizar calidad de video (PSNR/SSIM){self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 3{self.COLORS['G']} ] {self.COLORS['Y']}Generar espectrograma de audio{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 4{self.COLORS['G']} ] {self.COLORS['Y']}Informe técnico completo{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 5{self.COLORS['G']} ] {self.COLORS['Y']}Comparación entre dos archivos{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 6{self.COLORS['G']} ] {self.COLORS['Y']}Benchmark de rendimiento{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 7{self.COLORS['G']} ] {self.COLORS['Y']}Detector de artefactos visuales{self.COLORS['RE']}")
+            print(f"\n    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Volver al menú anterior{self.COLORS['RE']}")
+
+            option = input("\nSelecciona una opción >> ").strip()
+
+            if option == '1':
+                self.verify_media_integrity()
+            elif option == '2':
+                self.analyze_video_quality()
+            elif option == '3':
+                self.generate_audio_spectrogram()
+            elif option == '4':
+                self.generate_full_technical_report()
+            elif option == '5':
+                self.compare_two_files()
+            elif option == '6':
+                self.run_performance_benchmark()
+            elif option == '7':
+                self.detect_visual_artifacts()
+            elif option == '0':
+                return
+            else:
+                print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def verify_media_integrity(self):
+        """Verifica la integridad de un archivo multimedia usando FFmpeg."""
+        self.logo()
+        print(f"{self.COLORS['G']}Verificar Integridad de Archivo Multimedia{self.COLORS['RE']}\n")
+        file_path = input("Introduce la ruta completa del archivo a verificar >> ").strip()
+
+        if not os.path.isfile(file_path):
+            print(f"{self.COLORS['R']}El archivo no existe o la ruta es incorrecta.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Verificando {os.path.basename(file_path)}... (esto puede tardar){self.COLORS['RE']}")
+        
+        cmd = ["ffmpeg", "-v", "error", "-i", file_path, "-f", "null", "-"]
+
+        try:
+            self.start_custom_spinner("Analizando archivo...")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            self.stop_custom_spinner()
+            
+            if result.stderr:
+                print(f"{self.COLORS['Y']}El archivo parece tener problemas o advertencias:{self.COLORS['RE']}")
+                print(result.stderr)
+            else:
+                print(f"{self.COLORS['G']}✓ El archivo parece estar íntegro. No se encontraron errores críticos.{self.COLORS['RE']}")
+
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}✗ Se encontraron errores de corrupción en el archivo:{self.COLORS['RE']}")
+            print(e.stderr)
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: FFmpeg no encontrado. Asegúrate de que esté instalado.{self.COLORS['RE']}")
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+            
+        input("\nPresiona ENTER para continuar...")
+
+    def analyze_video_quality(self):
+        """Analiza la calidad de un video comparándolo con un original usando PSNR y SSIM."""
+        self.logo()
+        print(f"{self.COLORS['G']}Analizar Calidad de Video (PSNR/SSIM){self.COLORS['RE']}\n")
+        print(f"{self.COLORS['Y']}Esta herramienta compara un video procesado con su versión original.{self.COLORS['RE']}")
+        
+        original_file = input("Ruta del video ORIGINAL de referencia >> ").strip()
+        processed_file = input("Ruta del video PROCESADO a analizar >> ").strip()
+
+        if not os.path.isfile(original_file) or not os.path.isfile(processed_file):
+            print(f"{self.COLORS['R']}Uno o ambos archivos no existen. Verifica las rutas.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Analizando calidad... (esto puede ser muy lento y consumir recursos){self.COLORS['RE']}")
+        
+        cmd = [
+            "ffmpeg", "-hide_banner",
+            "-i", processed_file,
+            "-i", original_file,
+            "-lavfi", "[0:v]setpts=PTS-STARTPTS[dist];[1:v]setpts=PTS-STARTPTS[main];[main][dist]ssim;[main][dist]psnr",
+            "-f", "null", "-"
+        ]
+
+        try:
+            self.start_custom_spinner("Calculando métricas de calidad...")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            stderr_output = result.stderr
+            self.stop_custom_spinner()
+
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            stderr_output = e.stderr
+            if not stderr_output:
+                print(f"{self.COLORS['R']}✗ Error al analizar la calidad del video:{self.COLORS['RE']}")
+                print(e.stderr)
+                input("\nPresiona ENTER para continuar...")
+                return
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: FFmpeg no encontrado.{self.COLORS['RE']}")
+            input("\nPresiona ENTER para continuar...")
+            return
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+            input("\nPresiona ENTER para continuar...")
+            return
+
+        psnr_match = re.search(r"PSNR.*average:([0-9.]*)", stderr_output)
+        ssim_match = re.search(r"SSIM.*All:([0-9.]*)", stderr_output)
+
+        psnr_value = psnr_match.group(1) if psnr_match else "No calculado"
+        ssim_value = ssim_match.group(1) if ssim_match else "No calculado"
+
+        print(f"\n{self.COLORS['G']}--- Resultados del Análisis de Calidad ---{self.COLORS['RE']}")
+        print(f"{self.COLORS['C']}PSNR (Peak Signal-to-Noise Ratio):{self.COLORS['RE']} {psnr_value} dB")
+        print(f"{self.COLORS['Y']}(Valores más altos son mejores. >30dB suele ser bueno para compresión con pérdida){self.COLORS['RE']}")
+        
+        print(f"\n{self.COLORS['C']}SSIM (Structural Similarity Index):{self.COLORS['RE']} {ssim_value}")
+        print(f"{self.COLORS['Y']}(Valor entre 0 y 1. Más cercano a 1 es mejor, indica mayor similitud estructural){self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def generate_audio_spectrogram(self):
+        """Genera una imagen de espectrograma para un archivo de audio, con interpretación."""
+        self.logo()
+        print(f"{self.COLORS['G']}GENERADOR DE ESPECTROGRAMA{self.COLORS['RE']}")
+        audio_file = input(f"\n{self.COLORS['Y']}Selecciona archivo de audio:{self.COLORS['RE']}\n >> ").strip()
+
+        if not os.path.isfile(audio_file):
+            print(f"{self.COLORS['R']}Archivo no encontrado.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        output_image = os.path.splitext(audio_file)[0] + "_spectrogram.png"
+        
+        self.logo()
+        print(f"{self.COLORS['Y']}Generando espectrograma...{self.COLORS['RE']}")
+
+        cmd = [
+            "ffmpeg", "-i", audio_file,
+            "-lavfi", "showspectrumpic=s=1024x512:color=rainbow",
+            "-y",  # Sobrescribir si ya existe
+            output_image
+        ]
+
+        try:
+            self.start_custom_spinner("Procesando audio...")
+            subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+            self.stop_custom_spinner()
+
+            if os.path.exists(output_image):
+                self.logo()
+                print(f"{self.COLORS['G']}ESPECTROGRAMA GENERADO{self.COLORS['RE']}")
+                print(f"Archivo: {self.COLORS['C']}{output_image}{self.COLORS['RE']}\n")
+
+                # Mostrar interpretación básica
+                print(f"{self.COLORS['Y']}Interpretación básica:{self.COLORS['RE']}")
+                print(f"  - {self.COLORS['B']}Frecuencias bajas (inferior):{self.COLORS['RE']} Graves (bajos, bombos).")
+                print(f"  - {self.COLORS['R']}Frecuencias altas (superior):{self.COLORS['RE']} Agudos (platillos, siseos).")
+                print(f"  - {self.COLORS['Y']}Colores brillantes (amarillo/blanco):{self.COLORS['RE']} Mayor energía/volumen.")
+                print(f"  - {self.COLORS['P']}Patrones verticales:{self.COLORS['RE']} Eventos percusivos en el tiempo (golpes, clics).")
+                print(f"  - {self.COLORS['C']}Líneas horizontales:{self.COLORS['RE']} Tonos constantes (notas musicales, zumbidos).")
+
+                if shutil.which("termux-open"):
+                    open_img = input(f"\n{self.COLORS['Y']}¿Abrir imagen? (s/n){self.COLORS['RE']}\n >> ").strip().lower()
+                    if open_img == 's':
+                        subprocess.run(["termux-open", output_image])
+            else:
+                print(f"{self.COLORS['R']}Error al generar espectrograma.{self.COLORS['RE']}")
+
+        except subprocess.CalledProcessError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al generar espectrograma. El archivo puede estar corrupto o no ser un formato de audio válido.{self.COLORS['RE']}")
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: FFmpeg no encontrado. Asegúrate de que esté instalado.{self.COLORS['RE']}")
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def generate_full_technical_report(self):
+        """Muestra un informe técnico completo de un archivo multimedia usando ffprobe."""
+        self.logo()
+        print(f"{self.COLORS['G']}Informe Técnico Completo del Archivo{self.COLORS['RE']}\n")
+        file_path = input("Introduce la ruta completa del archivo a analizar >> ").strip()
+
+        if not os.path.isfile(file_path):
+            print(f"{self.COLORS['R']}El archivo no existe o la ruta es incorrecta.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Generando informe para {os.path.basename(file_path)}...{self.COLORS['RE']}")
+
+        cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
+
+        try:
+            self.start_custom_spinner("Extrayendo metadatos técnicos...")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            self.stop_custom_spinner()
+            
+            report_data = json.loads(result.stdout)
+            
+            self.logo()
+            print(f"{self.COLORS['G']}--- Informe Técnico ---{self.COLORS['RE']}")
+            
+            # Imprimir información del formato/contenedor
+            if 'format' in report_data:
+                print(f"\n{self.COLORS['C']}Contenedor y Formato:{self.COLORS['RE']}")
+                for key, value in report_data['format'].items():
+                    print(f"    {key}: {value}")
+
+            # Imprimir información de cada stream
+            if 'streams' in report_data:
+                for i, stream in enumerate(report_data['streams']):
+                    codec_type = stream.get('codec_type', 'desconocido').upper()
+                    print(f"\n{self.COLORS['C']}Stream #{i} - Tipo: {codec_type}{self.COLORS['RE']}")
+                    for key, value in stream.items():
+                        print(f"    {key}: {value}")
+
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}✗ Error al generar el informe:{self.COLORS['RE']}")
+            print(e.stderr)
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: ffprobe no encontrado. Asegúrate de que FFmpeg esté instalado.{self.COLORS['RE']}")
+        except json.JSONDecodeError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al interpretar la salida de ffprobe. El archivo puede estar corrupto.{self.COLORS['RE']}")
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+            
+        input("\nPresiona ENTER para continuar...")
+
+    def compare_two_files(self):
+        """Compara dos archivos multimedia, mostrando diferencias en sus metadatos técnicos."""
+        self.logo()
+        print(f"{self.COLORS['G']}Comparación Técnica Entre Dos Archivos{self.COLORS['RE']}\n")
+        
+        file1_path = input("Ruta del PRIMER archivo >> ").strip()
+        file2_path = input("Ruta del SEGUNDO archivo >> ").strip()
+
+        if not os.path.isfile(file1_path) or not os.path.isfile(file2_path):
+            print(f"{self.COLORS['R']}Uno o ambos archivos no existen. Verifica las rutas.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Analizando ambos archivos...{self.COLORS['RE']}")
+
+        try:
+            # Obtener datos del primer archivo
+            cmd1 = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file1_path]
+            result1 = subprocess.run(cmd1, check=True, capture_output=True, text=True)
+            data1 = json.loads(result1.stdout)
+
+            # Obtener datos del segundo archivo
+            cmd2 = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file2_path]
+            result2 = subprocess.run(cmd2, check=True, capture_output=True, text=True)
+            data2 = json.loads(result2.stdout)
+
+            self.logo()
+            print(f"{self.COLORS['G']}--- Comparación de Archivos ---{self.COLORS['RE']}")
+            print(f"{self.COLORS['C']}Archivo 1: {os.path.basename(file1_path)}{self.COLORS['RE']}")
+            print(f"{self.COLORS['C']}Archivo 2: {os.path.basename(file2_path)}{self.COLORS['RE']}")
+
+            # Comparar formato
+            print(f"\n{self.COLORS['Y']}--- Atributos del Contenedor (Formato) ---{self.COLORS['RE']}")
+            format1 = data1.get('format', {})
+            format2 = data2.get('format', {})
+            all_keys = sorted(list(set(format1.keys()) | set(format2.keys())))
+
+            for key in all_keys:
+                val1 = format1.get(key, 'N/A')
+                val2 = format2.get(key, 'N/A')
+                if str(val1) != str(val2):
+                    print(f"{key}: {self.COLORS['R']}{val1}{self.COLORS['RE']} -> {self.COLORS['R']}{val2}{self.COLORS['RE']}")
+                else:
+                    print(f"{key}: {val1}")
+
+            # Comparar streams
+            streams1 = data1.get('streams', [])
+            streams2 = data2.get('streams', [])
+            
+            print(f"\n{self.COLORS['Y']}--- Streams ---{self.COLORS['RE']}")
+            print(f"Archivo 1 tiene {len(streams1)} streams, Archivo 2 tiene {len(streams2)} streams.")
+
+            max_streams = max(len(streams1), len(streams2))
+            for i in range(max_streams):
+                print(f"\n{self.COLORS['C']}Comparando Stream #{i}{self.COLORS['RE']}")
+                s1 = streams1[i] if i < len(streams1) else {}
+                s2 = streams2[i] if i < len(streams2) else {}
+                all_stream_keys = sorted(list(set(s1.keys()) | set(s2.keys())))
+
+                for key in all_stream_keys:
+                    val1 = s1.get(key, 'N/A')
+                    val2 = s2.get(key, 'N/A')
+                    if str(val1) != str(val2):
+                        print(f"    {key}: {self.COLORS['R']}{val1}{self.COLORS['RE']} -> {self.COLORS['R']}{val2}{self.COLORS['RE']}")
+                    else:
+                        print(f"    {key}: {val1}")
+
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}✗ Error al analizar uno de los archivos: {e.stderr}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            print(f"{self.COLORS['R']}Error: ffprobe no encontrado.{self.COLORS['RE']}")
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def run_performance_benchmark(self):
+        """Realiza un benchmark de decodificación de video para medir el rendimiento."""
+        self.logo()
+        print(f"{self.COLORS['G']}Benchmark de Rendimiento de Decodificación{self.COLORS['RE']}\n")
+        video_file = input("Introduce la ruta del archivo de video para el benchmark >> ").strip()
+
+        if not os.path.isfile(video_file):
+            print(f"{self.COLORS['R']}El archivo no existe. Verifica la ruta.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Iniciando benchmark para {os.path.basename(video_file)}...{self.COLORS['RE']}")
+        print(f"{self.COLORS['Y']}Esto procesará el video sin guardarlo para medir la velocidad máxima.{self.COLORS['RE']}")
+
+        cmd = [
+            "ffmpeg", "-hide_banner",
+            "-benchmark",
+            "-i", video_file,
+            "-f", "null", "-"
+        ]
+
+        try:
+            self.start_custom_spinner("Ejecutando benchmark (puede tardar)...")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            stderr_output = result.stderr
+            self.stop_custom_spinner()
+
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            stderr_output = e.stderr # Aún si falla, puede haber info útil
+            if "benchmarking failed" in stderr_output or not stderr_output:
+                print(f"{self.COLORS['R']}✗ Error durante el benchmark:{self.COLORS['RE']}")
+                print(e.stderr)
+                input("\nPresiona ENTER para continuar...")
+                return
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: FFmpeg no encontrado.{self.COLORS['RE']}")
+            input("\nPresiona ENTER para continuar...")
+            return
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+            input("\nPresiona ENTER para continuar...")
+            return
+
+        speed_match = re.search(r"speed=\s*([0-9.]+)", stderr_output)
+        time_match = re.search(r"bench:\s*utime=([0-9.]+)s", stderr_output)
+
+        speed = speed_match.group(1) if speed_match else "No calculado"
+        total_time = time_match.group(1) if time_match else "No calculado"
+
+        print(f"\n{self.COLORS['G']}--- Resultados del Benchmark ---{self.COLORS['RE']}")
+        print(f"{self.COLORS['C']}Velocidad de procesamiento:{self.COLORS['RE']} {speed}x")
+        print(f"{self.COLORS['Y']}(Esto significa que el video se procesó {speed} veces más rápido que su duración real){self.COLORS['RE']}")
+        
+        print(f"\n{self.COLORS['C']}Tiempo total de CPU (user time):{self.COLORS['RE']} {total_time} segundos")
+        print(f"{self.COLORS['Y']}(Tiempo que la CPU gastó activamente en la tarea){self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def detect_visual_artifacts(self):
+        """Detecta y reporta artefactos visuales como congelamiento y bloques en un video."""
+        self.logo()
+        print(f"{self.COLORS['G']}Detector de Artefactos Visuales{self.COLORS['RE']}\n")
+        video_file = input("Introduce la ruta del archivo de video a analizar >> ").strip()
+
+        if not os.path.isfile(video_file):
+            print(f"{self.COLORS['R']}El archivo no existe. Verifica la ruta.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print(f"\n{self.COLORS['Y']}Analizando artefactos en {os.path.basename(video_file)}... (puede tardar){self.COLORS['RE']}")
+
+        cmd_freeze = [
+            "ffmpeg", "-hide_banner",
+            "-i", video_file,
+            "-vf", "freezedetect=n=-60dB:d=2", # n=ruido, d=duración mínima
+            "-f", "null", "-"
+        ]
+        
+        freezes_found = []
+        try:
+            self.start_custom_spinner("Paso 1/2: Detectando congelamientos...")
+            result = subprocess.run(cmd_freeze, check=True, capture_output=True, text=True)
+            stderr_output = result.stderr
+            self.stop_custom_spinner()
+            # Parsear la salida de freezedetect
+            for line in stderr_output.splitlines():
+                if "freezedetect" in line and ("start" in line or "end" in line):
+                    freezes_found.append(line.strip())
+
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            stderr_output = e.stderr
+            for line in stderr_output.splitlines():
+                if "freezedetect" in line and ("start" in line or "end" in line):
+                    freezes_found.append(line.strip())
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error en la detección de congelamiento: {e}{self.COLORS['RE']}")
+
+        print(f"\n{self.COLORS['Y']}La detección de 'blockiness' no es directa. Se mostrará información general.{self.COLORS['RE']}")
+        time.sleep(3)
+
+        self.logo()
+        print(f"{self.COLORS['G']}--- Resultados de Detección de Artefactos ---{self.COLORS['RE']}")
+        
+        # Imprimir resultados de congelamiento
+        print(f"\n{self.COLORS['C']}Detección de Congelamiento (freezedetect):{self.COLORS['RE']}")
+        if freezes_found:
+            print(f"{self.COLORS['R']}Se detectaron los siguientes eventos de congelamiento:{self.COLORS['RE']}")
+            for freeze_event in freezes_found:
+                print(f"    - {freeze_event}")
+        else:
+            print(f"{self.COLORS['G']}✓ No se detectaron congelamientos significativos en el video.{self.COLORS['RE']}")
+
+        print(f"\n{self.COLORS['C']}Detección de Bloques (Blockiness):{self.COLORS['RE']}")
+        print("Esta es una función experimental. Una tasa de bits muy variable o baja puede indicar problemas de bloques.")
+        print("Para un análisis más profundo, se recomiendan herramientas especializadas como VMAF.")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def _check_tool_versions(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Verificando Versiones de Herramientas{self.COLORS['RE']}\n")
+        
+        print(f"{self.COLORS['Y']}FFmpeg:{self.COLORS['RE']}")
+        try:
+            result = subprocess.run(["ffmpeg", "-version"], capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                print(f"{self.COLORS['C']}{result.stdout.splitlines()[0]}{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['R']}No se pudo obtener la versión de FFmpeg. Error: {result.stderr.strip()}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            print(f"{self.COLORS['R']}FFmpeg no encontrado. Asegúrate de que esté instalado y en tu PATH.{self.COLORS['RE']}")
+
+        print(f"\n{self.COLORS['Y']}ImageMagick (convert/mogrify):{self.COLORS['RE']}")
+        try:
+            result = subprocess.run(["convert", "-version"], capture_output=True, text=True, check=False)
+            if result.returncode == 0:
+                print(f"{self.COLORS['C']}{result.stdout.splitlines()[0]}{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['R']}No se pudo obtener la versión de ImageMagick. Error: {result.stderr.strip()}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            print(f"{self.COLORS['R']}ImageMagick no encontrado. Asegúrate de que esté instalado y en tu PATH.{self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def _list_supported_formats(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Formatos Soportados{self.COLORS['RE']}\n")
+        print(f"{self.COLORS['C']}{', '.join(sorted(self.FORMATOS))}{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def _parse_selection(self, selection_str, max_value):
+        """Parsea la selección del usuario, admitiendo rangos (ej: 1-5, 8, 10-12)."""
+        indices = set()
+        parts = selection_str.replace(',', ' ').split()
+
+        for part in parts:
+            part = part.strip()
+            if not part:
+                continue
+            
+            if '-' in part:
+                try:
+                    start, end = map(int, part.split('-'))
+                    if start > end:
+                        start, end = end, start 
+                    for i in range(start, end + 1):
+                        if 1 <= i <= max_value:
+                            indices.add(i - 1)
+                except ValueError:
+                    print(f"{self.COLORS['R']}Rango inválido: {part}{self.COLORS['RE']}")
+                    continue
+            else:
+                try:
+                    index = int(part)
+                    if 1 <= index <= max_value:
+                        # Restamos 1 porque la lista de archivos es 0-indexed
+                        indices.add(index - 1)
+                except ValueError:
+                    print(f"{self.COLORS['R']}Número inválido: {part}{self.COLORS['RE']}")
+                    continue
+        
+        return sorted(list(indices))
+
+    def _run_self_check(self):
+        self.logo()
+        print(f"{self.COLORS['G']}Ejecutando Autocomprobación del Sistema{self.COLORS['RE']}\n")
+        
+        print(f"{self.COLORS['Y']}Verificando dependencias esenciales...{self.COLORS['RE']}")
+        essential = ["ffmpeg", "mogrify", "curl"]
+        all_present = True
+        for pkg in essential:
+            if self.is_installed(pkg):
+                print(f"  {self.COLORS['G']}✓ {pkg} está instalado.{self.COLORS['RE']}")
+            else:
+                print(f"  {self.COLORS['R']}✗ {pkg} NO está instalado.{self.COLORS['RE']}")
+                all_present = False
+        
+        if all_present:
+            print(f"{self.COLORS['G']}Todas las dependencias esenciales están presentes.{self.COLORS['RE']}")
+        else:
+            print(f"{self.COLORS['R']}Faltan dependencias. Considera instalarlas.{self.COLORS['RE']}")
+
+        print(f"\n{self.COLORS['Y']}Verificando permisos de escritura en directorios clave...{self.COLORS['RE']}")
+        test_dirs = [os.path.expanduser("~/"), os.path.expanduser("~/ConverterProjects")]
+        for t_dir in test_dirs:
+            if os.path.exists(t_dir) and os.access(t_dir, os.W_OK):
+                print(f"  {self.COLORS['G']}✓ Escritura permitida en {t_dir}{self.COLORS['RE']}")
+            else:
+                print(f"  {self.COLORS['R']}✗ Escritura NO permitida en {t_dir} (o no existe).{self.COLORS['RE']}")
+
+        print(f"\n{self.COLORS['Y']}Comprobación de configuración de proyectos...{self.COLORS['RE']}")
+        if os.path.exists(self.PROJECTS_DIR):
+            print(f"  {self.COLORS['G']}✓ Directorio de proyectos existe: {self.PROJECTS_DIR}{self.COLORS['RE']}")
+        else:
+            print(f"  {self.COLORS['Y']}! Directorio de proyectos no existe, se creará al usar la gestión de proyectos.{self.COLORS['RE']}")
+
+        input("\nPresiona ENTER para continuar...")
+
+    def professional_console_mode(self):
+        """Inicia una sesión de consola (shell) para comandos avanzados."""
+        self.logo()
+        print(f"{self.COLORS['G']}Modo Consola Profesional{self.COLORS['RE']}\n")
+        print(f"{self.COLORS['Y']}¡ADVERTENCIA! Estás a punto de entrar en una shell del sistema.{self.COLORS['RE']}")
+        print(f"{self.COLORS['Y']}Cualquier comando que ejecutes aquí afectará directamente a tu sistema Termux.{self.COLORS['RE']}")
+        print(f"{self.COLORS['Y']}Escribe 'exit' y presiona Enter para volver al menú de Converter.{self.COLORS['RE']}")
+        input("Presiona ENTER para continuar y entrar a la consola...")
+
+        try:
+            # Copiar el entorno actual y establecer un PS1 personalizado
+            custom_env = os.environ.copy()
+            custom_env["PS1"] = f"{self.COLORS['G']}converter pro >> {self.COLORS['RE']}"
+            subprocess.run([os.environ.get("SHELL", "bash")], check=False, env=custom_env)
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error al iniciar la consola: {e}{self.COLORS['RE']}")
+        
+        self.logo()
+        print(f"{self.COLORS['G']}Has salido de la consola profesional.{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def internet_download(self):
+        """Descarga archivos de video o audio desde una URL."""
+        self.logo()
+        print(f"{self.COLORS['G']}Descargar desde Internet{self.COLORS['RE']}\n")
+        url = input("Introduce la URL del video o audio a descargar >> ").strip()
+        if not url:
+            print(f"{self.COLORS['R']}URL no válida.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        download_path = os.path.join(os.path.expanduser('~'), 'Downloads', 'Converter')
+        os.makedirs(download_path, exist_ok=True)
+
+        print(f"\n{self.COLORS['Y']}Descargando en: {download_path}{self.COLORS['RE']}")
+
+        cmd = ["yt-dlp", "-o", f"{download_path}/%(title)s.%(ext)s", url]
+
+        try:
+            self.start_custom_spinner("Descargando archivo...")
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['G']}¡Descarga completada!{self.COLORS['RE']}")
+            if result.stdout:
+                print(f"{self.COLORS['C']}Salida de yt-dlp:\n{result.stdout}{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al descargar (código {e.returncode}):{self.COLORS['RE']}")
+            print(f"{self.COLORS['R']}Stderr:\n{e.stderr}{self.COLORS['RE']}")
+        except FileNotFoundError:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error: yt-dlp no encontrado. Asegúrate de que esté instalado.{self.COLORS['RE']}")
+        except Exception as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error inesperado: {e}{self.COLORS['RE']}")
+        
+        input("\nPresiona ENTER para continuar...")
+
+    def api_setup(self):
+        """Configura las claves de API para servicios de IA, cifrando los datos."""
+        self.logo()
+        print(f"{self.COLORS['G']}Configuración de APIs de IA{self.COLORS['RE']}\n")
+        print(f"{self.COLORS['Y']}Tus claves de API se guardarán de forma cifrada.{self.COLORS['RE']}")
+
+        # Cargar configuración existente y descifrarla
+        config = {}
+        if os.path.exists(self.IA_CONFIG):
+            try:
+                with open(self.IA_CONFIG, 'r') as f:
+                    encrypted_config = json.load(f)
+                # Descifrar claves existentes para mostrarlas (opcional) o usarlas
+                for key, value in encrypted_config.items():
+                    config[key] = self.crypto.decrypt(value)
+            except (json.JSONDecodeError, TypeError):
+                pass
+
+        # Solicitar claves de API
+        print(f"\n{self.COLORS['Y']}Introduce tus claves de API (deja en blanco para no cambiar):{self.COLORS['RE']}")
+        
+        # Mostrar últimos 4 caracteres de la clave actual para referencia
+        current_openai_key = config.get("openai_api_key", "")
+        display_openai = f" (actual: ...{current_openai_key[-4:]})" if current_openai_key else ""
+        openai_key = input(f"OpenAI API Key{display_openai}: ").strip()
+        if openai_key:
+            config["openai_api_key"] = openai_key
+
+        current_google_key = config.get("google_api_key", "")
+        display_google = f" (actual: ...{current_google_key[-4:]})" if current_google_key else ""
+        google_api_key = input(f"Google AI API Key{display_google}: ").strip()
+        if google_api_key:
+            config["google_api_key"] = google_api_key
+
+        # Cifrar la configuración antes de guardarla
+        encrypted_config_to_save = {}
+        for key, value in config.items():
+            encrypted_config_to_save[key] = self.crypto.encrypt(value)
+
+        # Guardar configuración cifrada
+        with open(self.IA_CONFIG, 'w') as f:
+            json.dump(encrypted_config_to_save, f, indent=4)
+
+        try:
+            os.chmod(self.IA_CONFIG, 0o600)
+            print(f"\n{self.COLORS['G']}¡Configuración de API guardada y cifrada en {self.IA_CONFIG}!{self.COLORS['RE']}")
+        except OSError as e:
+            print(f"\n{self.COLORS['R']}Error al asegurar el archivo de configuración: {e}{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def notification_center(self):
+        """Muestra el centro de notificaciones."""
+        while True:
+            self.logo()
+            print(f"{self.COLORS['G']}Centro de Notificaciones{self.COLORS['RE']}\n")
+            print(f"{self.COLORS['Y']}--- Últimas 10 Notificaciones ---{self.COLORS['RE']}")
+
+            try:
+                if os.path.exists(self.NOTIF_LOG):
+                    with open(self.NOTIF_LOG, 'r') as f:
+                        lines = f.readlines()
+                        for line in lines[-10:]:
+                            print(f"  {self.COLORS['C']}{line.strip()}{self.COLORS['RE']}")
+                else:
+                    print("No hay notificaciones.")
+            except Exception as e:
+                print(f"{self.COLORS['R']}Error al leer el log: {e}{self.COLORS['RE']}")
+
+            print(f"\n{self.COLORS['G']}Opciones:")
+            print(f"    [{self.COLORS['RE']} 1{self.COLORS['G']} ] {self.COLORS['Y']}Ver log completo{self.COLORS['RE']}")
+            print(f"    [{self.COLORS['RE']} 2{self.COLORS['G']} ] {self.COLORS['Y']}Limpiar notificaciones{self.COLORS['RE']}")
+            print(f"\n    [{self.COLORS['RE']} 0{self.COLORS['G']} ] {self.COLORS['Y']}Volver al menú principal{self.COLORS['RE']}")
+
+            option = input("\nSelecciona una opción >> ").strip()
+
+            if option == '1':
+                self._view_full_log()
+            elif option == '2':
+                self._clear_notifications()
+            elif option == '0':
+                return
+            else:
+                print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+                time.sleep(1)
+
+    def _view_full_log(self):
+        """Muestra el contenido completo del log de notificaciones."""
+        self.logo()
+        print(f"{self.COLORS['G']}Log Completo de Notificaciones{self.COLORS['RE']}\n")
+        try:
+            if os.path.exists(self.NOTIF_LOG):
+                with open(self.NOTIF_LOG, 'r') as f:
+                    print(f.read())
+            else:
+                print("El archivo de log no existe.")
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error al leer el log: {e}{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+    def _clear_notifications(self):
+        """Limpia el archivo de log de notificaciones."""
+        self.logo()
+        confirm = input(f"{self.COLORS['R']}¿Estás seguro de que quieres eliminar TODAS las notificaciones? (s/n) >> {self.COLORS['RE']}").strip().lower()
+        if confirm == 's':
+            try:
+                if os.path.exists(self.NOTIF_LOG):
+                    with open(self.NOTIF_LOG, 'w') as f:
+                        f.write('') # Escribir una cadena vacía para limpiar
+                    print(f"{self.COLORS['G']}Notificaciones limpiadas.{self.COLORS['RE']}")
+                else:
+                    print(f"{self.COLORS['Y']}No había notificaciones que limpiar.{self.COLORS['RE']}")
+            except Exception as e:
+                print(f"{self.COLORS['R']}Error al limpiar el log: {e}{self.COLORS['RE']}")
+        else:
+            print(f"{self.COLORS['Y']}Operación cancelada.{self.COLORS['RE']}")
+        time.sleep(2)
+
+    def main_conversion(self):
+        """Proceso principal de conversión"""
+        self.logo()
+        print(f"{self.COLORS['G']}Escribe la ruta donde se encuentra")
+        print(f"tu archivo a convertir{self.COLORS['RE']} Ejemplo: {self.COLORS['R']}{os.path.join(os.path.expanduser('~'), 'Downloads')}{self.COLORS['RE']}")
+
+        ruta = input(f"{self.MODE} >> ").strip()
+        if ruta == "mi":
+            # Usar una ruta de descargas estándar como atajo
+            ruta = os.path.join(os.path.expanduser('/sdcard/'), 'youtube')
+
+        if not os.path.exists(ruta):
+            print(f"{self.COLORS['R']}[!]{self.COLORS['Y']} Ruta no existe, verifícala{self.COLORS['RE']}")
+            time.sleep(3)
+            return
+
+        self.RUTA = ruta
+        self.continue_conversion()
+
+    def copy_move_del(self, ruta, operation):
+        """Manejar operaciones de copiar, mover o eliminar"""
+        self.logo()
+        files = []
+        count = 1
+        for file in os.listdir(ruta):
+            file_path = os.path.join(ruta, file)
+            if os.path.isfile(file_path):
+                print(f"{self.COLORS['R']}[{self.COLORS['RE']} {count} {self.COLORS['R']}]{self.COLORS['G']} {file}{self.COLORS['RE']}")
+                files.append(file)
+                count += 1
+
+        if operation == "rm -rf":
+            operation_name = "eliminar"
+        elif operation == "cp -r":
+            operation_name = "copiar"
+        elif operation == "mv":
+            operation_name = "mover"
+
+        selection_str = input(f"Selecciona archivos a {operation_name} (ej: 1 3 5-8) >> ")
+        selected_indices = self._parse_selection(selection_str, len(files))
+        selected_files = [files[i] for i in selected_indices]
+
+        if not selected_files:
+            print(f"{self.COLORS['R']}No se seleccionaron archivos válidos.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.continue_conversion()
+            return
+
+        if operation == "rm -rf":
+            print(f"\n{self.COLORS['Y']}Estás a punto de eliminar los siguientes archivos permanentemente:{self.COLORS['RE']}")
+            for file in selected_files:
+                print(f" - {file}")
+            confirm = input(f"\n{self.COLORS['R']}¿Estás seguro de que deseas eliminar estos {len(selected_files)} archivos? (s/n) >> {self.COLORS['RE']}").strip().lower()
+            if confirm == 's':
+                for file in selected_files:
+                    file_path = os.path.join(ruta, file)
+                    os.remove(file_path)
+                    print(f"Eliminado: {file}")
+                print(f"\n{self.COLORS['G']}Archivos eliminados correctamente.{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['Y']}Operación de eliminación cancelada.{self.COLORS['RE']}")
+        else:
+            dest = input("Escribe la ruta destino >> ").strip()
+            os.makedirs(dest, exist_ok=True)
+            for file in selected_files:
+                src_path = os.path.join(ruta, file)
+                if operation == "cp -r":
+                    shutil.copy(src_path, dest)
+                    print(f"Copiado: {file} a {dest}")
+                elif operation == "mv":
+                    shutil.move(src_path, dest)
+                    print(f"Movido: {file} a {dest}")
+
+        time.sleep(2)
+        self.continue_conversion()
+
+    def editor(self, file_path):
+    
+     while True:
+        self.logo()
+        print(f"{self.COLORS['G']}Editando archivo: {self.COLORS['Y']}{file_path}{self.COLORS['RE']}")
+        
+        # Verificar si el archivo existe
+        if not os.path.exists(file_path):
+            print(f"{self.COLORS['R']}El archivo no existe!{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        # Mostrar opciones de edición mejoradas
+        print(f"\n{self.COLORS['G']}Opciones de edición:")
+        print(f"{self.COLORS['R']}[{self.COLORS['RE']} 1{self.COLORS['R']} ]{self.COLORS['G']} Cambiar nombre")
+        print(f"{self.COLORS['R']}[{self.COLORS['RE']} 2{self.COLORS['R']} ]{self.COLORS['G']} Editar metadatos")
+        print(f"{self.COLORS['R']}[{self.COLORS['RE']} 3{self.COLORS['R']} ]{self.COLORS['G']} Recortar audio/video")
+        print(f"{self.COLORS['R']}[{self.COLORS['RE']} 4{self.COLORS['R']} ]{self.COLORS['G']} Normalizar volumen")
+        print(f"{self.COLORS['R']}[{self.COLORS['RE']} 5{self.COLORS['R']} ]{self.COLORS['G']} Aplicar fade in/out")
+        print(f"{self.COLORS['R']}[{self.COLORS['RE']} 6{self.COLORS['R']} ]{self.COLORS['G']} Volver al menú anterior{self.COLORS['RE']}")
+
+        option = input("\nSelecciona una opción: ").strip()
+
+        if option == "1":
+            new_name_raw = input("Nuevo nombre (sin extensión): ").strip()
+            if new_name_raw:
+                sanitized_name = re.sub(r'[\\/?:*\"<>|]', '', new_name_raw)
+
+                if sanitized_name != new_name_raw:
+                    print(f"{self.COLORS['Y']}Nota: Se eliminaron caracteres inválidos del nombre.{self.COLORS['RE']}")
+                    print(f"Nombre sanitizado: {sanitized_name}")
+                    time.sleep(2)
+
+                ext = os.path.splitext(file_path)[1]
+                new_path = os.path.join(os.path.dirname(file_path), f"{sanitized_name}{ext}")
+                
+                if file_path == new_path:
+                    print(f"{self.COLORS['Y']}El nombre nuevo es igual al anterior. No se realizaron cambios.{self.COLORS['RE']}")
+                else:
+                    try:
+                        cmd = ["mv", file_path, new_path]
+                        subprocess.run(cmd, check=True, capture_output=True, text=True)
+                        print(f"{self.COLORS['G']}Nombre cambiado a: {sanitized_name}{ext}{self.COLORS['RE']}")
+                        file_path = new_path
+                    except subprocess.CalledProcessError as e:
+                        print(f"{self.COLORS['R']}Error al renombrar: {e.stderr.strip()}{self.COLORS['RE']}")
+                    except FileNotFoundError:
+                        print(f"{self.COLORS['R']}Error: El comando 'mv' no se encontró.{self.COLORS['RE']}")
+                time.sleep(2)
+        
+        elif option == "2":
+            self.edit_metadata(file_path)
+        
+        elif option == "3":
+            self.trim_file(file_path)
+        
+        elif option == "4":
+            self.normalize_audio(file_path)
+        
+        elif option == "5":
+            self.apply_fade(file_path)
+        
+        elif option == "6":
+
+            return file_path
+        
+        else:
+            print(f"{self.COLORS['R']}Opción inválida!{self.COLORS['RE']}")
+            time.sleep(1)
+
+    def edit_metadata(self, file_path):
+        """Editar metadatos de archivos multimedia"""
+        self.logo()
+        print(f"{self.COLORS['G']}Editando metadatos de: {self.COLORS['Y']}{file_path}{self.COLORS['RE']}")
+        
+        try:
+            cmd = ['ffmpeg', '-i', file_path, '-f', 'ffmetadata', '-']
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            metadata = result.stdout
+            print(f"\n{self.COLORS['C']}Metadatos actuales:{self.COLORS['RE']}\n{metadata}")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"{self.COLORS['R']}Error al leer metadatos: {e}{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        # Solicitar nuevos metadatos
+        print(f"\n{self.COLORS['G']}Ingresa los nuevos metadatos (deja en blanco para mantener):")
+        title = input("Título: ").strip()
+        artist = input("Artista: ").strip()
+        album = input("Álbum: ").strip()
+        year = input("Año: ").strip()
+        genre = input("Género: ").strip()
+
+        # Construir comando FFmpeg de forma segura
+        cmd = ["ffmpeg", "-i", file_path]
+        if title: cmd.extend(["-metadata", f"title={title}"])
+        if artist: cmd.extend(["-metadata", f"artist={artist}"])
+        if album: cmd.extend(["-metadata", f"album={album}"])
+        if year: cmd.extend(["-metadata", f"year={year}"])
+        if genre: cmd.extend(["-metadata", f"genre={genre}"])
+        
+        # Crear archivo temporal
+        ext = os.path.splitext(file_path)[1]
+        temp_file = file_path.replace(ext, f"_temp{ext}")
+        cmd.extend(["-c", "copy", "-y", temp_file])
+
+        # Ejecutar comando de forma segura
+        try:
+            self.start_custom_spinner()
+            result = subprocess.run(cmd, check=True, capture_output=True, text=True)
+            if not os.path.exists(temp_file):
+                print(f"{self.COLORS['R']}El archivo temporal no se creó: {temp_file}{self.COLORS['RE']}")
+                return
+            os.replace(temp_file, file_path)
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['G']}Metadatos actualizados correctamente!{self.COLORS['RE']}")
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al actualizar metadatos:\n{e.stderr}{self.COLORS['RE']}")
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                time.sleep(2)
+
+    def trim_file(self, file_path):
+        """Recortar archivos multimedia"""
+        self.logo()
+        print(f"{self.COLORS['G']}Recortando archivo: {self.COLORS['Y']}{file_path}{self.COLORS['RE']}")
+        try:
+             duration = subprocess.check_output(
+                     f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '{file_path}'",
+                     shell=True
+                     ).decode().strip()
+             duration = float(duration)
+             mins, secs = divmod(duration, 60)
+             print(f"\n{self.COLORS['G']}Duración actual: {int(mins)}:{int(secs):02d}{self.COLORS['RE']}")
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as e:
+            print(f"{self.COLORS['R']}Error al obtener la duración del archivo: {e}{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+        print(f"\n{self.COLORS['G']}Ingresa los tiempos de inicio y fin (formato MM:SS):")
+        start_time = input("Tiempo de inicio (dejar vacío para comenzar desde 0): ").strip() or "00:00"
+        end_time = input("Tiempo de fin (dejar vacío para terminar al final): ").strip()
+        ext = os.path.splitext(file_path)[1]
+        temp_file = file_path.replace(ext, f"_recortado{ext}")
+        cmd = [
+                "ffmpeg", 
+                "-hide_banner",
+                "-loglevel", "error",
+                "-ss", start_time,
+                "-i", file_path
+               ]
+        if start_time and start_time != "00:00":
+            cmd.extend(["-ss", start_time])
+        
+        if end_time:
+            cmd.extend(["-to", end_time])
+
+        cmd.extend(["-c", "copy", "-y", temp_file])
+
+        try:
+            self.run_ffmpeg_command(cmd)
+            if not os.path.exists(temp_file):
+                print(f"{self.COLORS['R']}El archivo recortado no se creó!{self.COLORS['RE']}")
+                return
+            os.replace(temp_file, file_path)
+            print(f"{self.COLORS['G']}Archivo recortado correctamente!{self.COLORS['RE']}")
+            input("Presiona ENTER para continuar..")
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}Error al recortar archivo: {e.stderr.decode()}{self.COLORS['RE']}")
+            input("Presiona ENTER para continuar..")
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+                input("\nPresiona ENTER para continuar...")
+
+    def normalize_audio(self, file_path):
+        """Normalizar el volumen de un archivo de audio"""
+        self.logo()
+        print(f"{self.COLORS['G']}Normalizando volumen de: {self.COLORS['Y']}{file_path}{self.COLORS['RE']}")
+    
+    # Verificar si es archivo de audio
+        if not file_path.lower().endswith(('.mp3', '.wav', '.flac', '.ogg', '.m4a')):
+            print(f"{self.COLORS['R']}Esta opción solo funciona con archivos de audio!{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Obtener nivel actual de volumen
+        try:
+            vol_info = subprocess.check_output(
+            f"ffmpeg -i '{file_path}' -filter:a volumedetect -f null /dev/null 2>&1 | grep 'mean_volume'",
+                shell=True
+            ).decode()
+            print(f"\n{self.COLORS['C']}Información de volumen actual:{self.COLORS['RE']}\n{vol_info}")
+        except (subprocess.CalledProcessError, FileNotFoundError) as e:
+            print(f"{self.COLORS['R']}Error al analizar el volumen del archivo: {e}{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Solicitar nivel de normalización
+        print(f"\n{self.COLORS['G']}Ingresa el nivel de normalización (en dB, ej: -1, -14):")
+        print(f"{self.COLORS['Y']}Recomendado: -14 dB para la mayoría de archivos{self.COLORS['RE']}")
+        target_level = input("Nivel objetivo (dB): ").strip()
+    
+        try:
+            target_level = float(target_level)
+        except ValueError:
+            print(f"{self.COLORS['R']}Debes ingresar un número válido!{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Crear archivo temporal
+        ext = os.path.splitext(file_path)[1]  # Obtiene ".mp3"
+        temp_file = file_path.replace(ext, f"_temp{ext}") 
+    # Construir comando FFmpeg para normalización
+        cmd = [
+            "ffmpeg",
+            "-hide_banner",
+            "-loglevel", "error",
+            "-i", file_path,
+            "-filter:a", f"loudnorm=I={target_level}:TP=-1.5:LRA=11",
+            "-y", temp_file
+        ]
+
+
+    
+    # Ejecutar normalización
+        try:
+            success = self.run_ffmpeg_command(cmd)
+
+        # Reemplazar archivo original
+            if success and os.path.exists(temp_file):
+                os.replace(temp_file, file_path)
+                print(f"{self.COLORS['G']}Volumen normalizado correctamente a {target_level} dB!{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['R']}✗ Error durante la normalización{self.COLORS['RE']}")
+                if os.path.exists(temp_file):
+                    os.remove(temp_file)
+                    time.sleep(2)
+        
+        # Mostrar nuevo análisis de volumen
+            vol_info = subprocess.check_output(
+            f"ffmpeg -i '{file_path}' -filter:a volumedetect -f null /dev/null 2>&1 | grep 'mean_volume'",
+                shell=True
+            ).decode()
+            print(f"\n{self.COLORS['C']}Nuevo nivel de volumen:{self.COLORS['RE']}\n{vol_info}")
+        
+        except subprocess.CalledProcessError as e:
+            self.stop_custom_spinner()
+            print(f"{self.COLORS['R']}Error al normalizar audio: {e.stderr.decode()}{self.COLORS['RE']}")
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+    
+        input("\nPresiona ENTER para continuar...")
+
+    def apply_fade(self, file_path):
+        """Aplicar fade in/out a un archivo de audio"""
+        self.logo()
+        print(f"{self.COLORS['G']}Aplicando fade in/out a: {self.COLORS['Y']}{file_path}{self.COLORS['RE']}")
+    
+    # Verificar si es archivo de audio
+        if not file_path.lower().endswith(('.mp3', '.wav', '.flac', '.ogg', '.m4a')):
+            print(f"{self.COLORS['R']}Esta opción solo funciona con archivos de audio!{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Obtener duración del audio
+        try:
+            duration = float(subprocess.check_output(
+                f"ffprobe -v error -show_entries format=duration -of default=noprint_wrappers=1:nokey=1 '{file_path}'",
+                shell=True
+            ).decode().strip())
+        except (subprocess.CalledProcessError, FileNotFoundError, ValueError) as e:
+            print(f"{self.COLORS['R']}Error al obtener la duración del archivo: {e}{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Mostrar información de duración
+        mins, secs = divmod(duration, 60)
+        print(f"\n{self.COLORS['G']}Duración total: {int(mins)}:{int(secs):02d}{self.COLORS['RE']}")
+    
+    # Solicitar parámetros de fade
+        print(f"\n{self.COLORS['G']}Configuración de fade:")
+        fade_in = input("Duración fade in (segundos, ej: 3): ").strip() or "0"
+        fade_out = input("Duración fade out (segundos, ej: 5): ").strip() or "0"
+    
+        try:
+            fade_in = float(fade_in)
+            fade_out = float(fade_out)
+        except ValueError:
+            print(f"{self.COLORS['R']}Debes ingresar números válidos!{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Validar que los fades no sean más largos que el audio
+        if fade_in + fade_out >= duration:
+            print(f"{self.COLORS['R']}La suma de los fades no puede ser mayor que la duración del audio!{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+    
+    # Crear archivo temporal
+        ext = os.path.splitext(file_path)[1]  # Obtiene ".mp3"
+        temp_file = file_path.replace(ext, f"_temp{ext}")
+    
+    # Construir comando FFmpeg para fade
+        cmd = ["ffmpeg", "-hide_banner", "-loglevel", "error","-i", file_path]
+    
+    # Aplicar fade in si se especificó
+        if fade_in > 0:
+            cmd.extend(["-af", f"afade=t=in:ss=0:d={fade_in}"])
+    
+    # Aplicar fade out si se especificó
+        if fade_out > 0:
+            start_fade_out = duration - fade_out
+            if fade_in > 0:
+            # Si ya hay un filtro, concatenamos con coma
+                cmd[-1] = cmd[-1] + f",afade=t=out:st={start_fade_out}:d={fade_out}"
+            else:
+                cmd.extend(["-af", f"afade=t=out:st={start_fade_out}:d={fade_out}"])
+    
+        cmd.extend(["-y", temp_file])
+    
+    # Ejecutar comando
+        try:
+            self.run_ffmpeg_command(cmd)
+        
+        # Reemplazar archivo original
+            os.replace(temp_file, file_path)
+            print(f"{self.COLORS['G']}Fade aplicado correctamente!")
+            print(f"Fade in: {fade_in}s | Fade out: {fade_out}s{self.COLORS['RE']}")
+        
+        except subprocess.CalledProcessError as e:
+            print(f"{self.COLORS['R']}Error al aplicar fade: {e.stderr.decode()}{self.COLORS['RE']}")
+            if os.path.exists(temp_file):
+                os.remove(temp_file)
+    
+        input("\nPresiona ENTER para continuar...")
+
+    def continue_conversion(self):
+        """Continuar con el proceso de conversión"""
+        self.logo()
+        print(f"{self.COLORS['G']} Estás ubicado en:{self.COLORS['RE']} {self.RUTA}")
+        
+        # Listar archivos en la ruta
+        files = []
+        count = 1
+        for file in os.listdir(self.RUTA):
+            file_path = os.path.join(self.RUTA, file)
+            if os.path.isfile(file_path):
+                print(f"{self.COLORS['R']}[{self.COLORS['RE']} {count} {self.COLORS['R']}]{self.COLORS['G']} {file}{self.COLORS['RE']}")
+                files.append(file)
+                count += 1
+
+        if not files:
+            print(f"{self.COLORS['R']}No se encontraron archivos en la ruta.{self.COLORS['RE']}")
+            time.sleep(2)
+            return
+
+        print()
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} r{self.COLORS['R']} ]{self.COLORS['G']} REFRESH   {self.COLORS['R']}[{self.COLORS['Y']} d{self.COLORS['R']} ]{self.COLORS['G']} DELETE")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} p{self.COLORS['R']} ]{self.COLORS['G']} NEW PATH  {self.COLORS['R']}[{self.COLORS['Y']} n{self.COLORS['R']} ]{self.COLORS['G']} NEW CONVERSION")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} s{self.COLORS['R']} ]{self.COLORS['G']} SEARCH FILES")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} c{self.COLORS['R']} ]{self.COLORS['G']} COPY      {self.COLORS['R']}[{self.COLORS['Y']} m{self.COLORS['R']} ]{self.COLORS['G']} MOVE{self.COLORS['RE']}")
+        
+
+        selection_str = input("Selecciona archivos (ej: 1 3 5-8) o un comando (r, d, p, etc.) \n>> ")
+
+        # Manejar comandos especiales
+        if selection_str.lower() in ['r', 'd', 'p', 'n', 'c', 'm', 's']:
+            command = selection_str.lower()
+            if command == 'r':
+                self.continue_conversion()
+                return
+            elif command == 'd':
+                self.copy_move_del(self.RUTA, "rm -rf")
+                return
+            elif command == 'p':
+                self.main_conversion()
+                return
+            elif command == 'n':
+                self.main_menu()
+                return
+            elif command == 'c':
+                self.copy_move_del(self.RUTA, "cp -r")
+                return
+            elif command == 'm':
+                self.copy_move_del(self.RUTA, "mv")
+                return
+            elif command == 's':
+                self.search_files()
+                return
+
+        selected_indices = self._parse_selection(selection_str, len(files))
+        self.FILES = [files[i] for i in selected_indices]
+
+        if not self.FILES:
+            print(f"{self.COLORS['R']}No se seleccionaron archivos válidos.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.continue_conversion()
+            return
+
+        self.check_files()
+
+    def search_files(self):
+        """Buscar archivos por nombre o extensión"""
+        self.logo()
+        print(f"{self.COLORS['G']}Buscar archivos en:{self.COLORS['RE']} {self.RUTA}\n")
+    
+        search_term = input("Introduce término de búsqueda (nombre o extensión): ").strip().lower()
+    
+        if not search_term:
+            print(f"{self.COLORS['R']}Debes introducir un término de búsqueda.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.continue_conversion()
+            return
+    
+        matching_files = []
+        count = 1
+    
+        print(f"\n{self.COLORS['G']}Archivos encontrados:{self.COLORS['RE']}")
+    
+        for file in os.listdir(self.RUTA):
+            file_path = os.path.join(self.RUTA, file)
+            if os.path.isfile(file_path) and search_term in file.lower():
+                print(f"{self.COLORS['R']}[{self.COLORS['RE']} {count} {self.COLORS['R']}]{self.COLORS['G']} {file}{self.COLORS['RE']}")
+                matching_files.append(file)
+                count += 1
+    
+        if not matching_files:
+            print(f"{self.COLORS['Y']}No se encontraron archivos que coincidan con '{search_term}'.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.continue_conversion()
+            return
+    
+        print(f"\n{self.COLORS['G']}Opciones para los archivos encontrados:{self.COLORS['RE']}")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} c{self.COLORS['R']} ]{self.COLORS['G']} CONVERTIR")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} d{self.COLORS['R']} ]{self.COLORS['G']} ELIMINAR")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} m{self.COLORS['R']} ]{self.COLORS['G']} MOVER")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} p{self.COLORS['R']} ]{self.COLORS['G']} COPIAR")
+        print(f"{self.COLORS['R']}[{self.COLORS['Y']} v{self.COLORS['R']} ]{self.COLORS['G']} VOLVER{self.COLORS['RE']}")
+    
+        action = input("\nSelecciona una acción >> ").strip().lower()
+    
+        if action not in ['c', 'd', 'm', 'p', 'v']:
+            print(f"{self.COLORS['R']}Opción inválida.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.search_files()
+            return
+    
+        if action == 'v':
+            self.continue_conversion()
+            return
+    
+        # Seleccionar archivos para la acción
+        selection_str = input("Selecciona archivos (ej: 1 3 5-8) >> ")
+        selected_indices = self._parse_selection(selection_str, len(matching_files))
+        selected_files = [matching_files[i] for i in selected_indices]
+    
+        if not selected_files:
+            print(f"{self.COLORS['R']}No se seleccionaron archivos válidos.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.search_files()
+            return
+    
+        # Realizar la acción seleccionada
+        if action == 'c':
+            self.FILES = selected_files
+            self.check_files()
+        elif action == 'd':
+            for file in selected_files:
+                os.remove(os.path.join(self.RUTA, file))
+                print(f"Eliminado: {file}")
+            time.sleep(2)
+            self.search_files()
+        elif action == 'm':
+            dest = input("Escribe la ruta destino >> ").strip()
+            os.makedirs(dest, exist_ok=True)
+            for file in selected_files:
+                shutil.move(os.path.join(self.RUTA, file), dest)
+                print(f"Movido: {file} a {dest}")
+            time.sleep(2)
+            self.search_files()
+        elif action == 'p':
+            dest = input("Escribe la ruta destino >> ").strip()
+            os.makedirs(dest, exist_ok=True)
+            for file in selected_files:
+                shutil.copy(os.path.join(self.RUTA, file), dest)
+                print(f"Copiado: {file} a {dest}")
+            time.sleep(2)
+            self.search_files()
+   # ```
+
+    def check_files(self):
+        """Verificar archivos seleccionados"""
+        files_to_process = []
+        for file in self.FILES:
+            file_path = os.path.join(self.RUTA, file)
+            if not os.path.isfile(file_path):
+                continue
+
+            extension = file.split('.')[-1].lower().replace("jpeg", "jpg")  # Unifica jpeg/jpg
+            if extension not in {fmt.lower() for fmt in self.FORMATOS}:
+                print(f"{self.COLORS['R']}Archivo incompatible:{self.COLORS['Y']} {file} (.{extension})")
+                print(f"Formatos soportados: {', '.join(sorted(self.FORMATOS))}")
+                time.sleep(3)
+                return
+
+            files_to_process.append(file)
+
+        self.FILES = files_to_process
+
+        if not files_to_process:
+            print(f"{self.COLORS['R']}No hay archivos válidos para procesar.{self.COLORS['RE']}")
+            time.sleep(2)
+            self.continue_conversion()
+            return
+
+        if not self.PROFILE_SELECTED:
+            self.logo()
+            print(f"{self.COLORS['Y']} Ingresa el formato de salida,{self.COLORS['RE']} Ejemplo: {self.COLORS['C']} {self.FR1}, {self.FR2}, {self.FR3} etc.{self.COLORS['RE']}")
+            self.EXIT = input(" -Milux- convert >> ").strip().lower()
+
+            if not self.EXIT:
+                print(f"{self.COLORS['R']}[X]{self.COLORS['Y']} No escribiste nada o Formato incompatible {self.COLORS['RE']}")
+                self.EXIT = input(" -Milux- convert >> ").strip().lower()
+
+        self.logo()
+        print(f"{self.COLORS['G']}La informacion, es correcta? s/n")
+        print(f"{self.COLORS['G']} Archivo(s):{self.COLORS['RE']}")
+
+        for file in self.FILES:
+            print(file)
+
+        print(f"{self.COLORS['G']}Formato:{self.COLORS['Y']} {self.EXIT} {self.COLORS['RE']}")
+        confirm = input(" S o N >> ").strip().lower()
+
+        if confirm == 's':
+            # Preguntar si se desea editar solo si es audio o video
+            if self.MODE != "- Imagen -":
+                if input("¿Deseas editar el archivo antes de convertir? (s/n) ").strip().lower() == 's':
+                    edited_files = []
+                    for file in self.FILES:
+                        edited_path = self.editor(os.path.join(self.RUTA, file))
+                        if edited_path: 
+                            edited_files.append(os.path.basename(edited_path))
+                    self.FILES = edited_files
+            
+            if self.MODE == "- Audio -":
+                self.music_conversion()     
+            elif self.MODE == "- Imagen -":
+                self.image_conversion()
+            elif self.MODE == "- Video -":
+                self.video_conversion()
+            elif self.MODE == "- Extraer Audio -":
+                self.extract_audio()
+        else:
+            self.continue_conversion()
+
+    def video_conversion(self):
+        """Conversión de archivos de video"""
+        for file in self.FILES:
+            try:
+                self.logo()
+                print(f"{self.COLORS['G']}Procesando:{self.COLORS['Y']} {file}{self.COLORS['RE']}")
+                
+                input_file = os.path.join(self.RUTA, file)
+                output_file = os.path.join(
+                    self.RUTA, 
+                    f"{os.path.splitext(file)[0]}.{self.EXIT}"
+                )
+                
+                if not os.path.isfile(input_file):
+                    print(f"{self.COLORS['R']}Error: Archivo no encontrado - {input_file}{self.COLORS['RE']}")
+                    time.sleep(2)
+                    continue
+                    
+                if not os.access(input_file, os.R_OK):
+                    print(f"{self.COLORS['R']}Error: Sin permisos para leer el archivo{self.COLORS['RE']}")
+                    time.sleep(2)
+                    continue
+
+                # Comando ffmpeg para conversión de video
+                cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-y",
+                    "-i", input_file,
+                    "-c:v", "libx264", 
+                    "-preset", "medium", 
+                    "-c:a", "aac", 
+                    "-b:a", "128k",
+                    output_file
+                ]
+                
+                try:
+                    self.start_custom_spinner(file_name=file)
+                    result = subprocess.run(
+                        cmd,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    
+                    if not os.path.exists(output_file):
+                        self.stop_custom_spinner()
+                        raise Exception("El archivo de salida no se creó")
+                    self.stop_custom_spinner()    
+                    print(f"{self.COLORS['G']}✓ Conversión de video exitosa!{self.COLORS['RE']}")
+                    
+                except subprocess.CalledProcessError as e:
+                    self.stop_custom_spinner()
+                    print(f"\n{self.COLORS['R']}Error en ffmpeg:{self.COLORS['RE']}")
+                    print(e.stderr)
+                    continue
+                    
+            except Exception as e:
+                self.stop_custom_spinner()
+                print(f"\n{self.COLORS['R']}Error inesperado:{self.COLORS['RE']} {str(e)}")
+                continue
+                
+            time.sleep(1)
+
+        self.part2()
+
+    def extract_audio(self):
+        """Extraer audio de archivos de video"""
+        for file in self.FILES:
+            try:
+                self.logo()
+                print(f"{self.COLORS['G']}Procesando:{self.COLORS['Y']} {file}{self.COLORS['RE']}")
+                
+                # Construir rutas completas
+                input_file = os.path.join(self.RUTA, file)
+                output_file = os.path.join(
+                    self.RUTA, 
+                    f"{os.path.splitext(file)[0]}.{self.EXIT}"
+                )
+                
+                # Verificar archivo de entrada
+                if not os.path.isfile(input_file):
+                    print(f"{self.COLORS['R']}Error: Archivo no encontrado - {input_file}{self.COLORS['RE']}")
+                    time.sleep(2)
+                    continue
+                    
+                # Verificar permisos
+                if not os.access(input_file, os.R_OK):
+                    print(f"{self.COLORS['R']}Error: Sin permisos para leer el archivo{self.COLORS['RE']}")
+                    time.sleep(2)
+                    continue
+
+                cmd = [
+                    "ffmpeg",
+                    "-hide_banner",
+                    "-loglevel", "error",
+                    "-y",
+                    "-i", input_file,
+                    "-vn",  
+                    "-acodec", "copy", 
+                    output_file
+                ]
+                
+                # Ejecutar conversión
+                try:
+                    self.start_custom_spinner(file_name=file)
+                    result = subprocess.run(
+                        cmd,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    
+                    if not os.path.exists(output_file):
+                        self.stop_custom_spinner()
+                        raise Exception("El archivo de salida no se creó")
+                    self.stop_custom_spinner()    
+                    print(f"{self.COLORS['G']}✓ Extracción exitosa!{self.COLORS['RE']}")
+                    
+                except subprocess.CalledProcessError as e:
+                    self.stop_custom_spinner()
+                    print(f"{self.COLORS['Y']}Copia de códec fallida, re-intentando con re-codificación...{self.COLORS['RE']}")
+                    cmd[-3] = "-c:a" # Cambiar a opción de códec de audio
+                    cmd[-2] = "libmp3lame" # Usar mp3 como fallback
+                    
+                    try:
+                        self.start_custom_spinner()
+                        result = subprocess.run(cmd, check=True, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+                        self.stop_custom_spinner()
+                        print(f"{self.COLORS['G']}✓ Extracción exitosa con re-codificación!{self.COLORS['RE']}")
+                    except subprocess.CalledProcessError as final_e:
+                        self.stop_custom_spinner()
+                        print(f"\n{self.COLORS['R']}Error final en ffmpeg:{self.COLORS['RE']}")
+                        print(final_e.stderr)
+                        continue
+                    
+            except Exception as e:
+                self.stop_custom_spinner()
+                print(f"\n{self.COLORS['R']}Error inesperado:{self.COLORS['RE']} {str(e)}")
+                continue
+                
+            time.sleep(1)
+
+        self.part2()
+
+    def image_conversion(self):
+        """Conversión de imágenes en Termux"""
+        for file in self.FILES:
+            try:
+                # Preparar rutas
+                input_path = os.path.join(self.RUTA, file)
+                output_filename = f"{os.path.splitext(file)[0]}.{self.EXIT}"
+                output_path = os.path.join(self.RUTA, output_filename)
+            
+                # Verificar si el archivo ya existe
+                if os.path.exists(output_path):
+                    os.remove(output_path)
+            
+                self.start_custom_spinner(file_name=file)
+            
+                cmd = ["convert", input_path, output_path]
+            
+                # Ejecutar conversión
+                process = subprocess.run(
+                    cmd,
+                    check=True,
+                    stdout=subprocess.PIPE,
+                    stderr=subprocess.PIPE,
+                    text=True
+                )
+            
+                self.stop_custom_spinner()
+            
+                if os.path.exists(output_path):
+                    print(f"{self.COLORS['G']}✓ {file} → {output_filename}{self.COLORS['RE']}")
+                else:
+                    print(f"{self.COLORS['R']}Error: No se generó el archivo de salida{self.COLORS['RE']}")
+                    if process.stderr:
+                        print(process.stderr)
+            
+            except subprocess.CalledProcessError as e:
+                self.stop_custom_spinner()
+                error_msg = e.stderr if e.stderr else "Error desconocido al convertir"
+                print(f"{self.COLORS['R']}Error con {file}:{self.COLORS['RE']}")
+                print(error_msg)
+            except Exception as e:
+                self.stop_custom_spinner()
+                print(f"{self.COLORS['R']}Error inesperado: {str(e)}{self.COLORS['RE']}")
+    
+        # Mostrar opciones post-conversión
+        self.part2()
+
+    def music_conversion(self):
+        """Conversión de archivos de audio - Versión corregida"""
+        for file in self.FILES:
+            try:
+                self.logo()
+                print(f"{self.COLORS['G']}Procesando:{self.COLORS['Y']} {file}{self.COLORS['RE']}")
+                
+                # Construir rutas completas
+                input_file = os.path.join(self.RUTA, file)
+                output_file = os.path.join(
+                    self.RUTA, 
+                    f"{os.path.splitext(file)[0]}.{self.EXIT}"
+                )
+                
+                # Verificar archivo de entrada
+                if not os.path.isfile(input_file):
+                    print(f"{self.COLORS['R']}Error: Archivo no encontrado - {input_file}{self.COLORS['RE']}")
+                    time.sleep(2)
+                    continue
+                    
+                # Verificar permisos
+                if not os.access(input_file, os.R_OK):
+                    print(f"{self.COLORS['R']}Error: Sin permisos para leer el archivo{self.COLORS['RE']}")
+                    time.sleep(2)
+                    continue
+
+                # Construir comando ffmpeg
+                cmd = [
+                    "ffmpeg",
+                    "-hide_banner",  
+                    "-loglevel", "error",  
+                    "-y",  
+                    "-i", input_file,
+                    output_file
+                ]
+                
+                # Ejecutar conversión
+                try:
+                    self.start_custom_spinner(file_name=file)
+                    result = subprocess.run(
+                        cmd,
+                        check=True,
+                        stdout=subprocess.PIPE,
+                        stderr=subprocess.PIPE,
+                        text=True
+                    )
+                    
+                    # Verificar si el archivo de salida se creó
+                    if not os.path.exists(output_file):
+                        self.stop_custom_spinner()
+                        raise Exception("El archivo de salida no se creó")
+                    self.stop_custom_spinner()    
+                    print(f"{self.COLORS['G']}✓ Conversión exitosa!{self.COLORS['RE']}")
+                    
+                except subprocess.CalledProcessError as e:
+                    self.stop_custom_spinner()
+                    print(f"\n{self.COLORS['R']}Error en ffmpeg (código {e.returncode}):{self.COLORS['RE']}")
+                    print(e.stderr)
+                    continue
+                    
+            except Exception as e:
+                self.stop_custom_spinner()
+                print(f"\n{self.COLORS['R']}Error inesperado:{self.COLORS['RE']} {str(e)}")
+                continue
+                
+            time.sleep(1)  # Pequeña pausa entre archivos
+
+        self.part2()
+
+    def run_ffmpeg_command(self, cmd):
+        """Ejecutar comando FFmpeg con mejor manejo de errores"""
+        try:
+            self.start_custom_spinner()
+            # Ejecutar el proceso
+            process = subprocess.Popen(
+                cmd,
+                stdout=subprocess.PIPE,
+                stderr=subprocess.PIPE,
+                universal_newlines=True
+            )
+            
+            # Mostrar progreso en tiempo real
+            while True:
+                output = process.stderr.readline()
+                if output == '' and process.poll() is not None:
+                    break
+                if output:
+                    print(output.strip())
+                    if process.returncode != 0:
+                        raise subprocess.CalledProcessError(
+                        process.returncode,
+                        cmd,
+                        process.stderr.read()
+                        )
+
+        except subprocess.CalledProcessError as e:
+            print(f"\n{self.COLORS['R']}Error en FFmpeg:{self.COLORS['RE']}")
+            print(e.stderr)
+            return False
+
+        except Exception as e:
+            print(f"\n{self.COLORS['R']}Error inesperado:{self.COLORS['RE']} {str(e)}")
+            return False
+            
+        finally:
+            self.stop_custom_spinner()
+        return True
+
+    def part2(self):
+        """Manejar archivos después de la conversión"""
+        self.logo()
+        print(f"{self.COLORS['G']}¿Que hago con archivos originales?")
+        print(f"\n[{self.COLORS['RE']} 1{self.COLORS['G']} ]{self.COLORS['Y']} Conservar")
+        print(f"[{self.COLORS['RE']} 2{self.COLORS['G']} ]{self.COLORS['Y']} Eliminar")
+        print(f"[{self.COLORS['RE']} 3{self.COLORS['G']} ]{self.COLORS['Y']} Eliminar antiguos y Mover nuevos")
+        print(f"{self.COLORS['RE']}")
+
+        option = input(f"{self.MODE} >> ").strip()
+
+        if option == "1":
+            self.show_conversion_success_message()
+            self.continue_conversion()
+        elif option == "2":
+            for file in self.FILES:
+                os.remove(os.path.join(self.RUTA, file))
+            self.show_conversion_success_message()
+            self.continue_conversion()
+        elif option == "3":
+            dest = input("Ingresa la ruta destino >> ").strip()
+            os.makedirs(dest, exist_ok=True)
+            for file in self.FILES:
+                # Eliminar original
+                os.remove(os.path.join(self.RUTA, file))
+                # Mover nuevo archivo
+                new_file = f"{os.path.splitext(file)[0]}.{self.EXIT}"
+                new_file_path = os.path.join(self.RUTA, new_file)
+                if os.path.exists(new_file_path):
+                    shutil.move(new_file_path, dest)
+                    print(f"Moviendo: {new_file} a {dest}")
+            self.continue_conversion()
+        else:
+            print(f"{self.COLORS['R']}[!]{self.COLORS['Y']} Opcion invalida{self.COLORS['RE']}")
+            time.sleep(3)
+            self.part2()
+
+    
+
+    def show_conversion_success_message(self):
+        """Mostrar mensaje de conversión exitosa"""
+        self.logo()
+        print(f"{self.COLORS['Y']} Convertido correctamente!\n Guardado como...{self.COLORS['G']}")
+        for file in self.FILES:
+            print(f"{os.path.splitext(file)[0]}.{self.EXIT}")
+        print(f"{self.COLORS['Y']}En:{self.COLORS['G']} {self.RUTA} {self.COLORS['RE']}")
+        input("Presiona ENTER para continuar..")
+
+    def _show_changelog(self, version):
+        """Muestra el changelog de la nueva versión."""
+        self.logo()
+        print(f"{self.COLORS['G']}--- Novedades en v{version} ---{self.COLORS['RE']}\n")
+        try:
+            if os.path.exists(self.CHANGELOG_FILE):
+                with open(self.CHANGELOG_FILE, 'r') as f:
+                    print(f.read())
+            else:
+                print("No se encontró el archivo CHANGELOG.")
+        except Exception as e:
+            print(f"{self.COLORS['R']}Error al leer el CHANGELOG: {e}{self.COLORS['RE']}")
+        input("\nPresiona ENTER para continuar...")
+
+
+if __name__ == "__main__":
+    converter = Converter()
+    converter.main_menu()
