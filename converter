@@ -26,15 +26,13 @@ class CryptoManager:
     def _get_unique_id(self):
         """Obtiene un identificador único y estable del sistema para la generación de la clave."""
         try:
-            # Un ID de instalación es ideal si existe y es estable.
+            
             id_path = os.path.expanduser("~/.gemini/installation_id")
             if os.path.exists(id_path):
                 with open(id_path, 'r') as f:
                     return f.read().strip()
-            # Como fallback, el hostname es una buena opción.
             return socket.gethostname()
         except Exception:
-            # Fallback final si todo lo demás falla.
             return "default_converter_host"
 
     def _generate_key(self):
@@ -47,7 +45,6 @@ class CryptoManager:
         if not plaintext:
             return None
         
-        # Asegurarnos de que el texto plano sea bytes
         if isinstance(plaintext, str):
             plaintext = plaintext.encode('utf-8')
             
@@ -69,7 +66,6 @@ class CryptoManager:
                 decrypted.append(encrypted_bytes[i] ^ self.key[i % len(self.key)])
             return decrypted.decode('utf-8')
         except (base64.binascii.Error, UnicodeDecodeError):
-            # Si falla el descifrado (p.ej. era una clave antigua en texto plano), la devolvemos tal cual.
             return ciphertext
 
 class Converter:
@@ -111,7 +107,7 @@ class Converter:
         self.crypto = CryptoManager() # Gestor de cifrado
         self.CAV_FILE = os.path.expanduser("~/.milux/cav.mlx") # Local version file
         self.CCV_FILE = os.path.expanduser("~/.milux/ccv.mlx") # Remote version file
-        self.CHANGELOG_FILE = os.path.expanduser("~/.milux/changelog.txt") # Changelog file
+        self.CHANGELOG_FILE = os.path.expanduser("~/.milux/changelog.txt") 
         os.makedirs(os.path.expanduser("~/.milux"), exist_ok=True)
         
     def get_supported_formats(self):
@@ -127,7 +123,6 @@ class Converter:
                 if line.strip() and (line.startswith(' D') or line.startswith(' E') or line.startswith(' DE')):
                     parts = line.split()
                     if len(parts) >= 2:
-                        # Tomar el código de formato (segunda columna)
                         ffmpeg_formats.append(parts[1].lower())
         
             # Obtener formatos de ImageMagick de forma segura
@@ -135,11 +130,9 @@ class Converter:
             out_magick, _ = proc_magick.communicate()
             imagemagick_formats = [line.split()[0].lower() for line in out_magick.decode().splitlines() 
                     if line and not line.startswith(' ') and '.' not in line.split()[0]]
-        
-            # Unificar y añadir formatos esenciales que podrían faltar
+    
             all_formats = set(ffmpeg_formats + imagemagick_formats)
-        
-            # Añadir formatos esenciales manualmente para asegurar compatibilidad
+    
             essential_formats = {'webm', 'mp4', 'mkv', 'avi', 'mov', 'mp3', 'wav', 'ogg', 
                             'flac', 'jpg', 'jpeg', 'png', 'gif', 'webp'}
             all_formats.update(essential_formats)
@@ -207,11 +200,21 @@ class Converter:
         except subprocess.CalledProcessError as e:
             print(f"{self.COLORS['R']}Error al instalar dependencias: {e}{self.COLORS['RE']}")
 
-    def start_custom_spinner(self, mensaje="Convirtiendo, ten paciencia......"):
+    def start_custom_spinner(self, mensaje="Convirtiendo, ten paciencia......", file_name=None):
         """Spinner animado tipo barra de progreso"""
         self.spinner_running = True
         spinner_frames = ['█■■■■■', '■█■■■■', '■■█■■■', '■■■█■■', '■■■■█■', '■■■■■█']
         self.logo()
+        if file_name:
+            try:
+                cols = os.get_terminal_size().columns
+                display_name = f"Se esta convirtiendo: {file_name}"
+                if len(display_name) > cols - 4:
+                    display_name = "..." + display_name[-(cols - 7):]
+                center = (cols - len(display_name)) // 2
+                print(f"{' ' * center}{self.COLORS['C']}{display_name}{self.COLORS['RE']}")
+            except OSError:
+                print(f"{self.COLORS['C']}Se esta convirtiendo: {file_name}{self.COLORS['RE']}")
     
         def spinner():
             i = 0
@@ -266,7 +269,7 @@ class Converter:
                     time.sleep(0.5)
         
             time.sleep(0.5)
-        except Exception: # Catching generic Exception for terminal size issues
+        except Exception: 
             print(f"\n\n{self.COLORS['Y']}{message}{self.COLORS['RE']}")
 
     def main_menu(self):
@@ -371,7 +374,7 @@ Elije una opcion
         print(f"{self.COLORS['G']}Buscando actualizaciones...{self.COLORS['RE']}")
         time.sleep(1)
 
-        # Asegurarse de que el directorio .milux existe
+        # Asegurar que el directorio .milux existe
         os.makedirs(os.path.dirname(self.CAV_FILE), exist_ok=True)
 
         # Crear archivo de versión local si no existe
@@ -424,13 +427,13 @@ Elije una opcion
             print(f"{self.COLORS['G']}¡Actualización completada!{self.COLORS['RE']}")
             print(f"{self.COLORS['Y']}Reiniciando CONVERTER v{remote_version}{self.COLORS['RE']}")
             time.sleep(3)
-            # Reiniciar el script de Python
+            # Reiniciar el script 
             os.execv(sys.executable, [sys.executable] + sys.argv)
 
         except subprocess.CalledProcessError as e:
             print(f"{self.COLORS['R']}Error durante la actualización: {e.stderr}{self.COLORS['RE']}")
             time.sleep(2)
-        except Exception as e: # Catch-all for any other unexpected errors during update
+        except Exception as e: 
             print(f"{self.COLORS['R']}Error inesperado durante la actualización: {e}{self.COLORS['RE']}")
             time.sleep(2)
 
@@ -828,7 +831,6 @@ Elije una opcion
                         deleted_count = 0
                         for file_path, _ in files_to_delete:
                             try:
-                                # Usar el comando 'rm' de la shell para robustez en Termux/sdcard
                                 print(f"{self.COLORS['Y']}DEBUG: Ejecutando comando: rm '{file_path}'{self.COLORS['RE']}")
                                 result = subprocess.run(["rm", file_path], check=True, capture_output=True, text=True)
                                 print(f"{self.COLORS['Y']}DEBUG: Stdout: {result.stdout.strip()}{self.COLORS['RE']}")
@@ -1175,7 +1177,7 @@ Elije una opcion
             print(f"{self.COLORS['G']}Proyecto actual establecido a '{project_name}'.{self.COLORS['RE']}")
         except OSError as e:
             print(f"{self.COLORS['R']}Error de sistema al crear el proyecto: {e}{self.COLORS['RE']}")
-        except Exception as e: # Catch-all for any other unexpected errors
+        except Exception as e: 
             print(f"{self.COLORS['R']}Error inesperado al crear el proyecto: {e}{self.COLORS['RE']}")
         time.sleep(2)
 
@@ -1205,7 +1207,7 @@ Elije una opcion
             print(f"{self.COLORS['R']}Entrada inválida. Por favor, ingresa un número.{self.COLORS['RE']}")
         except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
             print(f"{self.COLORS['R']}Error al cargar la configuración del proyecto: {e}{self.COLORS['RE']}")
-        except Exception as e: # Catch-all for any other unexpected errors
+        except Exception as e: 
             print(f"{self.COLORS['R']}Error inesperado al cargar el proyecto: {e}{self.COLORS['RE']}")
         time.sleep(2)
 
@@ -1263,9 +1265,6 @@ Elije una opcion
             try:
                 with open(config_path, 'r') as f:
                     config = json.load(f)
-                    # Cargar configuraciones específicas del proyecto si las hay
-                    # self.RUTA = config.get('last_path', '')
-                    # self.EXIT = config.get('last_exit_format', '')
             except (FileNotFoundError, json.JSONDecodeError, OSError) as e:
                 print(f"{self.COLORS['R']}Error al cargar la configuración del proyecto: {e}{self.COLORS['RE']}")
             except Exception as e: # Catch-all for any other unexpected errors
@@ -1286,7 +1285,7 @@ Elije una opcion
                 json.dump(config, f, indent=4)
         except (IOError, OSError, json.JSONDecodeError) as e:
             print(f"{self.COLORS['R']}Error de E/S o JSON al guardar la configuración del proyecto: {e}{self.COLORS['RE']}")
-        except Exception as e: # Catch-all for any other unexpected errors
+        except Exception as e: 
             print(f"{self.COLORS['R']}Error inesperado al guardar la configuración del proyecto: {e}{self.COLORS['RE']}")
 
     def diagnostic_tools(self):
@@ -1338,8 +1337,6 @@ Elije una opcion
 
         print(f"\n{self.COLORS['Y']}Verificando {os.path.basename(file_path)}... (esto puede tardar){self.COLORS['RE']}")
         
-        # Comando de FFmpeg para verificar errores. -v error solo muestra errores críticos.
-        # -f null descarta la salida, solo nos interesa el proceso de decodificación.
         cmd = ["ffmpeg", "-v", "error", "-i", file_path, "-f", "null", "-"]
 
         try:
@@ -1348,7 +1345,6 @@ Elije una opcion
             self.stop_custom_spinner()
             
             if result.stderr:
-                # Si hay algo en stderr (incluso con -v error), puede ser una advertencia o error.
                 print(f"{self.COLORS['Y']}El archivo parece tener problemas o advertencias:{self.COLORS['RE']}")
                 print(result.stderr)
             else:
@@ -1383,8 +1379,6 @@ Elije una opcion
 
         print(f"\n{self.COLORS['Y']}Analizando calidad... (esto puede ser muy lento y consumir recursos){self.COLORS['RE']}")
         
-        # Comando FFmpeg para calcular SSIM y PSNR. Requiere un filtro complejo.
-        # [0:v] es el video procesado, [1:v] es el original.
         cmd = [
             "ffmpeg", "-hide_banner",
             "-i", processed_file,
@@ -1395,14 +1389,12 @@ Elije una opcion
 
         try:
             self.start_custom_spinner("Calculando métricas de calidad...")
-            # El resultado de estos filtros se imprime en stderr
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             stderr_output = result.stderr
             self.stop_custom_spinner()
 
         except subprocess.CalledProcessError as e:
             self.stop_custom_spinner()
-            # A diferencia de otros casos, aquí stderr contiene la salida aunque haya un "error"
             stderr_output = e.stderr
             if not stderr_output:
                 print(f"{self.COLORS['R']}✗ Error al analizar la calidad del video:{self.COLORS['RE']}")
@@ -1420,7 +1412,6 @@ Elije una opcion
             input("\nPresiona ENTER para continuar...")
             return
 
-        # Parsear la salida de stderr para encontrar los valores
         psnr_match = re.search(r"PSNR.*average:([0-9.]*)", stderr_output)
         ssim_match = re.search(r"SSIM.*All:([0-9.]*)", stderr_output)
 
@@ -1452,7 +1443,6 @@ Elije una opcion
         self.logo()
         print(f"{self.COLORS['Y']}Generando espectrograma...{self.COLORS['RE']}")
 
-        # Comando FFmpeg para generar el espectrograma, usando la configuración del usuario
         cmd = [
             "ffmpeg", "-i", audio_file,
             "-lavfi", "showspectrumpic=s=1024x512:color=rainbow",
@@ -1462,7 +1452,6 @@ Elije una opcion
 
         try:
             self.start_custom_spinner("Procesando audio...")
-            # Redirigir stdout y stderr para suprimir la salida de ffmpeg en la consola
             subprocess.run(cmd, check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
             self.stop_custom_spinner()
 
@@ -1479,7 +1468,6 @@ Elije una opcion
                 print(f"  - {self.COLORS['P']}Patrones verticales:{self.COLORS['RE']} Eventos percusivos en el tiempo (golpes, clics).")
                 print(f"  - {self.COLORS['C']}Líneas horizontales:{self.COLORS['RE']} Tonos constantes (notas musicales, zumbidos).")
 
-                # Mostrar en el dispositivo si es posible (Termux)
                 if shutil.which("termux-open"):
                     open_img = input(f"\n{self.COLORS['Y']}¿Abrir imagen? (s/n){self.COLORS['RE']}\n >> ").strip().lower()
                     if open_img == 's':
@@ -1512,9 +1500,6 @@ Elije una opcion
 
         print(f"\n{self.COLORS['Y']}Generando informe para {os.path.basename(file_path)}...{self.COLORS['RE']}")
 
-        # Comando ffprobe para obtener toda la información en formato JSON para fácil lectura.
-        # -show_format: Muestra información del contenedor.
-        # -show_streams: Muestra información de todos los streams (video, audio, etc.).
         cmd = ["ffprobe", "-v", "quiet", "-print_format", "json", "-show_format", "-show_streams", file_path]
 
         try:
@@ -1647,8 +1632,6 @@ Elije una opcion
         print(f"\n{self.COLORS['Y']}Iniciando benchmark para {os.path.basename(video_file)}...{self.COLORS['RE']}")
         print(f"{self.COLORS['Y']}Esto procesará el video sin guardarlo para medir la velocidad máxima.{self.COLORS['RE']}")
 
-        # Comando FFmpeg para benchmark. `-benchmark` imprime estadísticas de tiempo.
-        # `-f null -` envía la salida a la nada.
         cmd = [
             "ffmpeg", "-hide_banner",
             "-benchmark",
@@ -1658,7 +1641,6 @@ Elije una opcion
 
         try:
             self.start_custom_spinner("Ejecutando benchmark (puede tardar)...")
-            # La información del benchmark se imprime en stderr
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             stderr_output = result.stderr
             self.stop_custom_spinner()
@@ -1682,10 +1664,7 @@ Elije una opcion
             input("\nPresiona ENTER para continuar...")
             return
 
-        # Parsear la salida de stderr para los resultados del benchmark
-        # Buscamos la velocidad de procesamiento (speed)
         speed_match = re.search(r"speed=\s*([0-9.]+)", stderr_output)
-        # Buscamos el tiempo total de procesamiento
         time_match = re.search(r"bench:\s*utime=([0-9.]+)s", stderr_output)
 
         speed = speed_match.group(1) if speed_match else "No calculado"
@@ -1713,10 +1692,6 @@ Elije una opcion
 
         print(f"\n{self.COLORS['Y']}Analizando artefactos en {os.path.basename(video_file)}... (puede tardar){self.COLORS['RE']}")
 
-        # Usaremos dos filtros: `freezedetect` para congelamientos y `blockdetect` para bloques.
-        # Se ejecutan en dos pasadas para no interferir entre sí.
-
-        # --- 1. Detección de Congelamiento (freezedetect) ---
         cmd_freeze = [
             "ffmpeg", "-hide_banner",
             "-i", video_file,
@@ -1737,7 +1712,6 @@ Elije una opcion
 
         except subprocess.CalledProcessError as e:
             self.stop_custom_spinner()
-            # Aún si falla, puede haber info útil en la salida
             stderr_output = e.stderr
             for line in stderr_output.splitlines():
                 if "freezedetect" in line and ("start" in line or "end" in line):
@@ -1746,12 +1720,6 @@ Elije una opcion
             self.stop_custom_spinner()
             print(f"{self.COLORS['R']}Error en la detección de congelamiento: {e}{self.COLORS['RE']}")
 
-        # --- 2. Detección de Bloques (blockdetect) ---
-        # Este filtro no existe de forma nativa, usamos una aproximación con `idet`
-        # o podríamos usar un filtro más complejo si estuviera disponible.
-        # Por simplicidad, usaremos `idet` que puede detectar entrelazado, que a veces se confunde con bloques.
-        # Una solución más avanzada requeriría VMAF o filtros personalizados.
-        # Aquí usaremos una solución más simple: analizar la tasa de bits por frame.
         print(f"\n{self.COLORS['Y']}La detección de 'blockiness' no es directa. Se mostrará información general.{self.COLORS['RE']}")
         time.sleep(3)
 
@@ -1819,8 +1787,7 @@ Elije una opcion
                 try:
                     start, end = map(int, part.split('-'))
                     if start > end:
-                        start, end = end, start # Permitir rangos inversos como 5-1
-                    # Restamos 1 porque la lista de archivos es 0-indexed
+                        start, end = end, start 
                     for i in range(start, end + 1):
                         if 1 <= i <= max_value:
                             indices.add(i - 1)
@@ -1948,7 +1915,6 @@ Elije una opcion
                 for key, value in encrypted_config.items():
                     config[key] = self.crypto.decrypt(value)
             except (json.JSONDecodeError, TypeError):
-                # Si el archivo está vacío, malformado o no es un dict, se tratará como nuevo
                 pass
 
         # Solicitar claves de API
@@ -1976,7 +1942,6 @@ Elije una opcion
         with open(self.IA_CONFIG, 'w') as f:
             json.dump(encrypted_config_to_save, f, indent=4)
 
-        # Asegurar el archivo de configuración dándole permisos restrictivos
         try:
             os.chmod(self.IA_CONFIG, 0o600)
             print(f"\n{self.COLORS['G']}¡Configuración de API guardada y cifrada en {self.IA_CONFIG}!{self.COLORS['RE']}")
@@ -2100,10 +2065,18 @@ Elije una opcion
             return
 
         if operation == "rm -rf":
+            print(f"\n{self.COLORS['Y']}Estás a punto de eliminar los siguientes archivos permanentemente:{self.COLORS['RE']}")
             for file in selected_files:
-                file_path = os.path.join(ruta, file)
-                os.remove(file_path)
-                print(f"Eliminado: {file}")
+                print(f" - {file}")
+            confirm = input(f"\n{self.COLORS['R']}¿Estás seguro de que deseas eliminar estos {len(selected_files)} archivos? (s/n) >> {self.COLORS['RE']}").strip().lower()
+            if confirm == 's':
+                for file in selected_files:
+                    file_path = os.path.join(ruta, file)
+                    os.remove(file_path)
+                    print(f"Eliminado: {file}")
+                print(f"\n{self.COLORS['G']}Archivos eliminados correctamente.{self.COLORS['RE']}")
+            else:
+                print(f"{self.COLORS['Y']}Operación de eliminación cancelada.{self.COLORS['RE']}")
         else:
             dest = input("Escribe la ruta destino >> ").strip()
             os.makedirs(dest, exist_ok=True)
@@ -2145,7 +2118,6 @@ Elije una opcion
         if option == "1":
             new_name_raw = input("Nuevo nombre (sin extensión): ").strip()
             if new_name_raw:
-                # Sanitizar el nombre para eliminar caracteres no permitidos en sistemas de archivos
                 sanitized_name = re.sub(r'[\\/?:*\"<>|]', '', new_name_raw)
 
                 if sanitized_name != new_name_raw:
@@ -2195,9 +2167,7 @@ Elije una opcion
         self.logo()
         print(f"{self.COLORS['G']}Editando metadatos de: {self.COLORS['Y']}{file_path}{self.COLORS['RE']}")
         
-        # Obtener metadatos actuales
         try:
-            # Usar una lista de argumentos para evitar inyección de comandos
             cmd = ['ffmpeg', '-i', file_path, '-f', 'ffmetadata', '-']
             result = subprocess.run(cmd, check=True, capture_output=True, text=True)
             metadata = result.stdout
@@ -2512,7 +2482,6 @@ Elije una opcion
                 self.search_files()
                 return
 
-        # Procesar selección de archivos usando la nueva función
         selected_indices = self._parse_selection(selection_str, len(files))
         self.FILES = [files[i] for i in selected_indices]
 
@@ -2638,7 +2607,6 @@ Elije una opcion
             self.continue_conversion()
             return
 
-        # Si no se seleccionó un perfil, preguntar por el formato de salida
         if not self.PROFILE_SELECTED:
             self.logo()
             print(f"{self.COLORS['Y']} Ingresa el formato de salida,{self.COLORS['RE']} Ejemplo: {self.COLORS['C']} {self.FR1}, {self.FR2}, {self.FR3} etc.{self.COLORS['RE']}")
@@ -2665,7 +2633,7 @@ Elije una opcion
                     edited_files = []
                     for file in self.FILES:
                         edited_path = self.editor(os.path.join(self.RUTA, file))
-                        if edited_path:  # Asegurarse de que el editor no devolvió None
+                        if edited_path: 
                             edited_files.append(os.path.basename(edited_path))
                     self.FILES = edited_files
             
@@ -2718,7 +2686,7 @@ Elije una opcion
                 ]
                 
                 try:
-                    self.start_custom_spinner()
+                    self.start_custom_spinner(file_name=file)
                     result = subprocess.run(
                         cmd,
                         check=True,
@@ -2774,21 +2742,20 @@ Elije una opcion
                     time.sleep(2)
                     continue
 
-                # Construir comando ffmpeg para extracción de audio
                 cmd = [
                     "ffmpeg",
                     "-hide_banner",
                     "-loglevel", "error",
                     "-y",
                     "-i", input_file,
-                    "-vn",  # Opción clave: deshabilita el stream de video
-                    "-acodec", "copy", # Intenta copiar el códec de audio para máxima calidad y velocidad
+                    "-vn",  
+                    "-acodec", "copy", 
                     output_file
                 ]
                 
                 # Ejecutar conversión
                 try:
-                    self.start_custom_spinner()
+                    self.start_custom_spinner(file_name=file)
                     result = subprocess.run(
                         cmd,
                         check=True,
@@ -2804,7 +2771,6 @@ Elije una opcion
                     print(f"{self.COLORS['G']}✓ Extracción exitosa!{self.COLORS['RE']}")
                     
                 except subprocess.CalledProcessError as e:
-                    # Si falla la copia del códec, intentar re-codificando
                     self.stop_custom_spinner()
                     print(f"{self.COLORS['Y']}Copia de códec fallida, re-intentando con re-codificación...{self.COLORS['RE']}")
                     cmd[-3] = "-c:a" # Cambiar a opción de códec de audio
@@ -2843,9 +2809,8 @@ Elije una opcion
                 if os.path.exists(output_path):
                     os.remove(output_path)
             
-                self.start_custom_spinner(f"Convirtiendo {file}...")
+                self.start_custom_spinner(file_name=file)
             
-                # Comando convert para Termux (asegura rutas entre comillas)
                 cmd = ["convert", input_path, output_path]
             
                 # Ejecutar conversión
@@ -2859,7 +2824,6 @@ Elije una opcion
             
                 self.stop_custom_spinner()
             
-                # Verificar si se creó el archivo de salida
                 if os.path.exists(output_path):
                     print(f"{self.COLORS['G']}✓ {file} → {output_filename}{self.COLORS['RE']}")
                 else:
@@ -2908,16 +2872,16 @@ Elije una opcion
                 # Construir comando ffmpeg
                 cmd = [
                     "ffmpeg",
-                    "-hide_banner",  # Ocultar información de banner
-                    "-loglevel", "error",  # Solo mostrar errores
-                    "-y",  # Sobrescribir sin preguntar
+                    "-hide_banner",  
+                    "-loglevel", "error",  
+                    "-y",  
                     "-i", input_file,
                     output_file
                 ]
                 
                 # Ejecutar conversión
                 try:
-                    self.start_custom_spinner()
+                    self.start_custom_spinner(file_name=file)
                     result = subprocess.run(
                         cmd,
                         check=True,
@@ -3049,7 +3013,6 @@ Elije una opcion
             print(f"{self.COLORS['R']}Error al leer el CHANGELOG: {e}{self.COLORS['RE']}")
         input("\nPresiona ENTER para continuar...")
 
-    # ... (resto de funciones permanecen iguales)
 
 if __name__ == "__main__":
     converter = Converter()
