@@ -1,0 +1,2 @@
+wgwet https://github.com/miluxmil/milux/raw/refs/heads/master/converter.deb
+dpkg -i converter.deb
