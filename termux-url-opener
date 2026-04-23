@@ -1,0 +1,462 @@
+#!/data/data/com.termux/files/usr/bin/python3
+# Copyright 2021 ::milux::
+
+import os
+import sys
+import subprocess
+import json
+import logging
+import time
+from pathlib import Path
+
+# Configure logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(levelname)s - %(message)s',
+    filename='/data/data/com.termux/files/home/termux-url-opener.log'
+)
+
+# Configuration
+CONFIG_PATH = '/data/data/com.termux/files/home/.milux/config.json'
+DEFAULT_CONFIG = {
+    "version": "1.0",
+    "download_path": "/sdcard/youtube/",
+    "spotify_path": "/sdcard/youtube/spotify/",
+    "colors": {
+        "C": "\033[1;36m",
+        "G": "\033[1;32m",
+        "R": "\033[1;31m",
+        "Y": "\033[1;33m",
+        "B": "\033[1;34m",
+        "P": "\033[1;35m",
+        "RE": "\033[0m"
+    }
+}
+
+def load_config():
+    """Load or create configuration file."""
+    if not os.path.exists(CONFIG_PATH):
+        os.makedirs(os.path.dirname(CONFIG_PATH), exist_ok=True)
+        with open(CONFIG_PATH, 'w') as f:
+            json.dump(DEFAULT_CONFIG, f, indent=4)
+    with open(CONFIG_PATH, 'r') as f:
+        return json.load(f)
+
+config = load_config()
+
+# Colors for output
+C = config["colors"]["C"]
+G = config["colors"]["G"]
+R = config["colors"]["R"]
+Y = config["colors"]["Y"]
+B = config["colors"]["B"]
+P = config["colors"]["P"]
+RE = config["colors"]["RE"]
+
+def check_dependency(dependency):
+    """Check if a dependency is installed."""
+    try:
+        subprocess.run([dependency, "--version"], stdout=subprocess.PIPE, stderr=subprocess.PIPE, check=True)
+        return True
+    except (subprocess.CalledProcessError, FileNotFoundError):
+        return False
+
+def install_dependency(dependency):
+    """Install a dependency using apt."""
+    try:
+        subprocess.run(["apt", "install", "-y", dependency], check=True)
+        logging.info(f"Installed {dependency}")
+        return True
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to install {dependency}: {e}")
+        return False
+
+def spin():
+    """Display a spinning indicator."""
+    spinner = ['|', '/', '-', '\\']
+    for _ in range(10):
+        for frame in spinner:
+            sys.stdout.write(f'\r{G}Obteniendo formatos... {frame}{RE}')
+            sys.stdout.flush()
+            time.sleep(0.1)
+    print()  # Add a newline at the end
+
+def logo():
+    """Display the logo."""
+    os.system('clear')
+    print(f"""
+{G}##############################################
+##                                          ##
+##{RE}      Y D L  -  D O W N L O A D E R{G}       ##
+##{R}                            by -Milux-{G}    ##
+##                                          ##
+##{RE}   Youtube   -  Spotify   -   Dailymotion{G}  ##
+##{RE}         Facebook   -    TikTok  {G}         ##
+##############################################
+                       {RE}       Version:{B} {config["version"]} {G}
+//////////////////////////////////////////////{RE}
+""")
+
+def exit_success():
+    """Display success message."""
+    logo()
+    print(f"{G}Se ha descargado con Exito!{RE}")
+
+def formats():
+    """Display available formats."""
+    formats_file = Path.home() / ".milux" / "formats.mlx"
+    if not formats_file.exists():
+        print(f"{R}No formats file found.{RE}")
+        return
+    
+    with open(formats_file, 'r') as f:
+        formats_content = f.read()
+    
+    print(f"{G}[{RE}1{G}] {Y}Descargar en MP3{RE}")
+    
+    # Check formats by resolution
+    resolutions = [
+        ("240", "2", "426x240 - 240p"),
+        ("360", "3", "640x360 - 360p"),
+        ("480", "4", "854x480 - 480p"),
+        ("720", "5", "1280x720 - 720p"),
+        ("1080", "6", "1920x1080 - 1080p"),
+        ("1440", "7", "2560x1440 - 1440p"),
+        ("2160", "8", "3840x2160 - 4K")
+    ]
+    
+    for height, option, label in resolutions:
+        if f"{height}x" in formats_content or f"x{height}" in formats_content:
+            print(f"{G}[{RE}{option}{G}] {Y}Descargar en {label}{RE}")
+        else:
+            print(f"{G}[{RE}X{G}] {R}{label} No Disponible{RE}")
+    
+    print(f"{G}[{RE}U{G}] {Y}Buscar la ultima version{RE}")
+    print(f"{G}[{RE}F{G}] {Y}Reparar script{RE}")
+    print(f"{G}[{RE}A{G}] {Y}Acerca de..{RE}")
+    print(f"{G}[{RE}X{G}] {Y}Salir{RE}")
+
+def download_spotify(url):
+    """Download from Spotify."""
+    song_dir = config["spotify_path"]
+    os.makedirs(song_dir, exist_ok=True)
+    
+    try:
+        subprocess.run(["spotifydl", url, "-o", song_dir], check=True)
+        exit_success()
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Spotify download failed: {e}")
+        print(f"{R}Error al descargar desde Spotify.{RE}")
+
+def download_youtube(url):
+    """Download from YouTube."""
+    formats_file = Path.home() / ".milux" / "formats.mlx"
+    
+    print(f"{G}Obteniendo formatos...{RE}")
+    spin()
+    try:
+        subprocess.run(["yt-dlp", "-F", url], stdout=formats_file.open('w'), check=True)
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to fetch YouTube formats: {e}")
+        print(f"{R}Error al obtener formatos de YouTube.{RE}")
+        return
+    
+    formats()
+    print(f"{G}[{Y}!{G}] {RE}SI TODAS LAS OPCIONES ES: [ NO DISPONIBLE ] REINTENTA{RE}")
+    
+    # Check if running in interactive mode
+    if sys.stdin.isatty():
+        option = input(f"{G}-Milux- >> {RE}").strip()
+    else:
+        # Default to MP3 if not interactive
+        option = "1"
+        print(f"{G}Modo no interactivo: Descargando en MP3 por defecto.{RE}")
+    
+    if option.lower() == "u":
+        buscar_ultima_version(url)
+        return
+    elif option.lower() == "x":
+        sys.exit(0)
+    elif option.lower() == "a":
+        acerca_de(url)
+        return
+    elif option.lower() == "f":
+        reparar_script(url)
+        return
+    elif option == "1":
+        # MP3 download logic
+        output_path = "/data/data/com.termux/files/home/storage/shared/Youtube/%(title)s.%(ext)s"
+        try:
+            subprocess.run(["yt-dlp", "--extract-audio", "--audio-format", "mp3", "--output", output_path, url], check=True)
+            print(f"{G}Descarga en MP3 completada.{RE}")
+            # Suggest conversion if converter is installed
+            suggest_conversion(output_path)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"MP3 download failed: {e}")
+            print(f"{R}Error al descargar en MP3.{RE}")
+    elif option in ["2", "3", "4", "5", "6", "7", "8"]:
+        # Video download logic
+        resolution_map = {
+            "2": "240",
+            "3": "360",
+            "4": "480",
+            "5": "720",
+            "6": "1080",
+            "7": "1440",
+            "8": "2160"
+        }
+        resolution = resolution_map[option]
+        print(f"{G}Descargando en {resolution}p...{RE}")
+        output_path = "/data/data/com.termux/files/home/storage/shared/Youtube/%(title)s.%(ext)s"
+        try:
+            subprocess.run(["yt-dlp", "-f", f"bestvideo[height<={resolution}]+bestaudio/best[height<={resolution}]", "--output", output_path, url], check=True)
+            print(f"{G}Descarga en {resolution}p completada.{RE}")
+            # Suggest conversion if converter is installed
+            suggest_conversion(output_path)
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Video download failed: {e}")
+            print(f"{R}Error al descargar en {resolution}p.{RE}")
+    else:
+        print(f"{R}Opción no válida.{RE}")
+
+def download_dailymotion(url):
+    """Download from Dailymotion."""
+    try:
+        result = subprocess.run(["youtube-dl", "-F", url], capture_output=True, text=True, check=True)
+        print(result.stdout)
+        
+        # Parse formats and prompt user
+        formats = result.stdout.splitlines()
+        options = {}
+        for line in formats:
+            if "1080" in line:
+                options["1"] = line.split()[0]
+            elif "720" in line:
+                options["2"] = line.split()[0]
+            elif "480" in line:
+                options["3"] = line.split()[0]
+            elif "380" in line:
+                options["4"] = line.split()[0]
+            elif "240" in line:
+                options["5"] = line.split()[0]
+        
+        for key, value in options.items():
+            print(f"{G}[{RE}{key}{G}] {Y}Video calidad {value}{RE}")
+        
+        choice = input(f"{G}Selecciona una opción >> {RE}").strip()
+        if choice in options:
+            subprocess.run(["youtube-dl", "-f", options[choice], url], check=True)
+            print(f"{G}Listo!{RE}")
+            input("Presiona Enter para continuar...")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Dailymotion download failed: {e}")
+        print(f"{R}Error al descargar desde Dailymotion.{RE}")
+
+def buscar_ultima_version(url):
+    """Buscar la última versión del script."""
+    logo()
+    print(f"{G}Buscando la última versión...{RE}")
+    
+    try:
+        # Descargar el script original para comparar versiones
+        print(f"{G}Descargando información de la última versión...{RE}")
+        subprocess.run(["wget", "https://raw.githubusercontent.com/miluxmil/milux/master/bin/termux-url-opener", "-O", "latest_version"], check=True)
+        
+        # Leer la versión del script original
+        with open("latest_version", "r") as f:
+            for line in f:
+                if "VA=" in line:
+                    latest_version = line.split("=")[1].strip().strip('"')
+                    break
+        
+        current_version = config["version"]
+        
+        if latest_version > current_version:
+            print(f"{G}¡Hay una nueva versión disponible!{RE}")
+            print(f"{Y}Versión actual:{RE} {current_version}")
+            print(f"{Y}Última versión:{RE} {latest_version}")
+            print(f"{G}Descargando la última versión...{RE}")
+            
+            # Descargar y reemplazar el script
+            subprocess.run(["wget", "https://raw.githubusercontent.com/miluxmil/milux/master/bin/termux-url-opener", "-O", "/data/data/com.termux/files/home/bin/termux-url-opener"], check=True)
+            os.chmod("/data/data/com.termux/files/home/bin/termux-url-opener", 0o755)
+            
+            print(f"{G}¡Actualización completada!{RE}")
+        else:
+            print(f"{G}Ya tienes la última versión.{RE}")
+            print(f"{Y}Versión actual:{RE} {current_version}")
+        
+        # Limpiar el archivo temporal
+        os.remove("latest_version")
+    except subprocess.CalledProcessError as e:
+        logging.error(f"Failed to check for updates: {e}")
+        print(f"{R}No se pudo conectar al repositorio para buscar actualizaciones.{RE}")
+        print(f"{Y}Verifica tu conexión a Internet y vuelve a intentarlo.{RE}")
+    
+    input(f"{G}Presiona Enter para continuar...{RE}")
+    mostrar_menu_principal(url)
+
+def mostrar_menu_principal(url):
+    """Mostrar el menú principal de descarga."""
+    if "open.spotify.com" in url:
+        download_spotify(url)
+    elif "youtu.be" in url or "youtube.com" in url:
+        download_youtube(url)
+    elif "dailymotion.com" in url:
+        download_dailymotion(url)
+    elif "vm.tiktok.com" in url:
+        download_tiktok(url)
+    else:
+        print(f"{R}URL no soportada.{RE}")
+
+def acerca_de(url):
+    """Mostrar información sobre la herramienta."""
+    logo()
+    print(f"""
+{G}=============================================={RE}
+{G}Acerca de YDL-DOWNLOADER{RE}
+{G}=============================================={RE}
+
+{R}Versión:{RE} {B}{config["version"]}{RE}
+{R}Autor:{RE} {B}Milux{RE}
+{R}Descripción:{RE} {Y}Una herramienta para descargar contenido multimedia desde diversas plataformas.{RE}
+
+{G}Características:{RE}
+{Y}• Descarga de videos y música desde YouTube, Spotify, Dailymotion y TikTok.{RE}
+{Y}• Soporte para múltiples formatos y calidades.{RE}
+{Y}• Conversión automática de archivos.{RE}
+{Y}• Interfaz interactiva y fácil de usar.{RE}
+
+{G}Uso:{RE}
+{Y}1. Comparte un enlace desde la aplicación deseada.{RE}
+{Y}2. Selecciona la calidad o formato de descarga.{RE}
+{Y}3. ¡Disfruta de tu contenido descargado!{RE}
+
+{G}=============================================={RE}
+""")
+    input(f"{G}Presiona Enter para continuar...{RE}")
+    mostrar_menu_principal(url)
+
+def reparar_script(url):
+    """Reparar el script y sus dependencias."""
+    logo()
+    print(f"{G}Iniciando proceso de reparación...{RE}")
+    
+    # Verificar y reinstalar dependencias
+    print(f"{G}Verificando dependencias...{RE}")
+    dependencies = ["wget", "yt-dlp", "spotifydl", "youtube-dl"]
+    for dep in dependencies:
+        if not check_dependency(dep):
+            print(f"{Y}Reinstalando {dep}...{RE}")
+            install_dependency(dep)
+        else:
+            print(f"{G}{dep} ya está instalado.{RE}")
+    
+    # Verificar permisos del script
+    script_path = "/data/data/com.termux/files/home/bin/termux-url-opener"
+    if not os.access(script_path, os.X_OK):
+        print(f"{Y}Corrigiendo permisos del script...{RE}")
+        os.chmod(script_path, 0o755)
+        print(f"{G}Permisos corregidos.{RE}")
+    else:
+        print(f"{G}Permisos del script son correctos.{RE}")
+    
+    # Restablecer configuración si es necesario
+    config_path = "/data/data/com.termux/files/home/.milux/config.json"
+    if not os.path.exists(config_path):
+        print(f"{Y}Restableciendo configuración...{RE}")
+        load_config()
+        print(f"{G}Configuración restablecida.{RE}")
+    else:
+        print(f"{G}Configuración existe y parece correcta.{RE}")
+    
+    print(f"{G}Proceso de reparación completado.{RE}")
+    input(f"{G}Presiona Enter para continuar...{RE}")
+    mostrar_menu_principal(url)
+
+def download_tiktok(url):
+    """Download from TikTok."""
+    try:
+        subprocess.run(["youtube-dl", "-f", "0", url], check=True)
+        exit_success()
+    except subprocess.CalledProcessError as e:
+        logging.error(f"TikTok download failed: {e}")
+        print(f"{R}Error al descargar desde TikTok.{RE}")
+
+def suggest_conversion(file_path):
+    """Suggest converting the downloaded file if converter is installed."""
+    if check_dependency("converter"):
+        # Check if running in interactive mode
+        if sys.stdin.isatty():
+            print(f"{G}¿Deseas convertir el archivo ahora? (s/n){RE}")
+            choice = input().strip().lower()
+            if choice == "s":
+                try:
+                    # Find the most recently downloaded file
+                    download_dir = "/data/data/com.termux/files/home/storage/shared/Youtube"
+                    files = sorted(Path(download_dir).glob("*.*"), key=os.path.getmtime, reverse=True)
+                    if files:
+                        latest_file = files[0]
+                        subprocess.run(["converter", str(latest_file)], check=True)
+                        print(f"{G}Archivo convertido con éxito.{RE}")
+                    else:
+                        print(f"{R}No se encontraron archivos para convertir.{RE}")
+                except subprocess.CalledProcessError as e:
+                    logging.error(f"Conversion failed: {e}")
+                    print(f"{R}Error al convertir el archivo.{RE}")
+        else:
+            print(f"{G}Modo no interactivo: Omitiendo sugerencia de conversión.{RE}")
+
+def main():
+    """Main function."""
+    if len(sys.argv) < 2:
+        print(f"{R}Usage: {sys.argv[0]} <URL>{RE}")
+        sys.exit(1)
+    
+    url = sys.argv[1]
+    
+    if url == "--install":
+        # Install dependencies
+        dependencies = ["wget", "yt-dlp", "spotifydl"]
+        for dep in dependencies:
+            if not check_dependency(dep):
+                print(f"{G}Installing {dep}...{RE}")
+                install_dependency(dep)
+        
+        # Download and run installer
+        try:
+            subprocess.run(["wget", "https://raw.githubusercontent.com/miluxmil/milux/master/installer", "-O", "installer"], check=True)
+            subprocess.run(["bash", "installer"], check=True)
+            os.remove("installer")
+        except subprocess.CalledProcessError as e:
+            logging.error(f"Installation failed: {e}")
+            print(f"{R}Error durante la instalación.{RE}")
+        return
+    
+    if url == "--reparar":
+        reparar_script()
+        return
+    
+    if url == "--buscar-version":
+        buscar_ultima_version()
+        return
+    
+    if url == "--acerca-de":
+        acerca_de()
+        return
+    
+    logo()
+    
+    if "open.spotify.com" in url:
+        download_spotify(url)
+    elif "youtu.be" in url or "youtube.com" in url:
+        download_youtube(url)
+    elif "dailymotion.com" in url:
+        download_dailymotion(url)
+    elif "vm.tiktok.com" in url:
+        download_tiktok(url)
+    else:
+        print(f"{R}URL no soportada.{RE}")
+
+if __name__ == "__main__":
+    main()
